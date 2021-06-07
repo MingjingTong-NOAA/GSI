@@ -86,7 +86,7 @@ subroutine get_gefs_ensperts_dualres
 ! type(gsi_grid)  :: grid_ens
   real(r_kind) bar_norm,sig_norm,kapr,kap1,rh
   real(r_kind),allocatable,dimension(:,:):: z,sst2
-  real(r_kind),allocatable,dimension(:,:,:) :: tsen,prsl,pri,qs
+  real(r_kind),allocatable,dimension(:,:,:) :: tsen,prsl,pri,qsat
 
 ! integer(i_kind),dimension(grd_ens%nlat,grd_ens%nlon):: idum
   integer(i_kind) istatus,iret,i,ic2,ic3,j,k,n,mm1,iderivative,im,jm,km,m,ipic
@@ -180,7 +180,7 @@ subroutine get_gefs_ensperts_dualres
 ! Get 3d pressure field now on interfaces
          allocate(pri(im,jm,km+1))
          call general_getprs_glb(ps,tv,pri)
-         allocate(prsl(im,jm,km),tsen(im,jm,km),qs(im,jm,km))
+         allocate(prsl(im,jm,km),tsen(im,jm,km),qsat(im,jm,km))
 ! Get sensible temperature and 3d layer pressure
          if (idsl5 /= 2) then
 !$omp parallel do schedule(dynamic,1) private(k,j,i)
@@ -208,7 +208,7 @@ subroutine get_gefs_ensperts_dualres
 
          ice=.true.
          iderivative=0
-         call genqsat(qs,tsen,prsl,im,jm,km,ice,iderivative)
+         call genqsat(qsat,tsen,prsl,im,jm,km,ice,iderivative)
          deallocate(tsen,prsl)
        end if
 
@@ -242,7 +242,7 @@ subroutine get_gefs_ensperts_dualres
                 do k=1,km
                    do j=1,jm
                       do i=1,im
-                         rh=p3(i,j,k)/qs(i,j,k)
+                         rh=p3(i,j,k)/qsat(i,j,k)
                          w3(i,j,k) = rh
                          x3(i,j,k)=x3(i,j,k)+rh
                       end do
@@ -280,7 +280,7 @@ subroutine get_gefs_ensperts_dualres
           end do
 
        end do !c3d
-       if (.not.q_hyb_ens) deallocate(qs)
+       if (.not.q_hyb_ens) deallocate(qsat)
 
 !_$omp parallel do schedule(dynamic,1) private(i,j,ic2,ipic)
        do ic2=1,nc2d
@@ -352,9 +352,9 @@ subroutine get_gefs_ensperts_dualres
      end do
 
 ! Before converting to perturbations, get ensemble spread
-     !-- if (m == 1 .and. write_ens_sprd )  call ens_spread_dualres(en_bar(1),1)
+     !if (m == 4 .and. write_ens_sprd )  call ens_spread_dualres(en_bar(m),m)
      !!! it is not clear of the next statement is thread/$omp safe.
-     if (write_ens_sprd )  call ens_spread_dualres(en_bar(m),m)
+     !!! if (write_ens_sprd )  call ens_spread_dualres(en_bar(m),m)
 
 
      call gsi_bundlegetpointer(en_bar(m),'ps',x2,istatus)
@@ -393,6 +393,8 @@ subroutine get_gefs_ensperts_dualres
         end do
      end do
   end do
+
+  call ens_spread_dualres(en_bar(4),4)
 
 !  since initial version is ignoring sst perturbations, skip following code for now.  revisit
 !   later--creating general_read_gfssfc, analogous to general_read_gfsatm above.
@@ -530,13 +532,14 @@ subroutine ens_spread_dualres(en_bar,ibin)
   sube%values=zero
   do n=1,n_ens
      do i=1,nelen
-        sube%values(i)=sube%values(i) &
-           +(en_perts(n,ibin)%valuesr4(i)-en_bar%values(i))*(en_perts(n,ibin)%valuesr4(i)-en_bar%values(i))
+        !sube%values(i)=sube%values(i) &
+        !   +(en_perts(n,ibin)%valuesr4(i)-en_bar%values(i))*(en_perts(n,ibin)%valuesr4(i)-en_bar%values(i))
+        sube%values(i)=sube%values(i) + en_perts(n,ibin)%valuesr4(i)*en_perts(n,ibin)%valuesr4(i)
      end do
   end do
 
   do i=1,nelen
-    sube%values(i) = sqrt(sp_norm*sube%values(i))
+    sube%values(i) = sqrt(sp_norm*sube%values(i)*max(one,n_ens-one))
   end do
 
   if(grd_ens%latlon1n == grd_anl%latlon1n) then
@@ -606,6 +609,7 @@ subroutine write_spread_dualres(ibin,bundle)
   use gsi_bundlemod, only: gsi_bundlegetpointer
   use control_vectors, only: cvars2d,cvars3d,nc2d,nc3d
   use constants, only: zero
+  use radinfo, only: allsky_verbose
   implicit none
 
   integer(i_kind), intent(in) :: ibin
@@ -623,13 +627,15 @@ subroutine write_spread_dualres(ibin,bundle)
   real(r_kind),pointer,dimension(:,:,:):: ptr3d
   real(r_kind),pointer,dimension(:,:):: ptr2d
 
-  integer(i_kind) iret,i,j,k,n,mem2d,mem3d,num3d,lu,istat
+  integer(i_kind) iret,i,j,k,n,mem2d,mem3d,lu,istat
   real(r_kind),dimension(grd_anl%nsig+1) :: prs
+
+  real(r_single),allocatable,dimension(:) :: glon,glat
+  real(r_kind) :: dx, dy
 
 ! Initial memory used by 2d and 3d grids
   mem2d = 4*grd_anl%nlat*grd_anl%nlon
   mem3d = 4*grd_anl%nlat*grd_anl%nlon*grd_anl%nsig
-  num3d=11
 
   allocate(work8_3d(grd_anl%nlat,grd_anl%nlon,grd_anl%nsig))
   allocate(work8_2d(grd_anl%nlat,grd_anl%nlon))
@@ -637,9 +643,28 @@ subroutine write_spread_dualres(ibin,bundle)
   allocate(work4_2d(grd_anl%nlon,grd_anl%nlat))
 
   if (mype==0) then
-    write(grdfile,'(a,i3.3,a)') 'ens_spread_',ibin, '.grd'
-    call baopenwt(22,trim(grdfile),iret)
+    write(grdfile,'(a,i3.3)') 'ens_spread_',ibin
+    call baopenwt(22,trim(grdfile)//'.grd',iret)
     write(6,*)'WRITE_SPREAD_DUALRES:  open 22 to ',trim(grdfile),' with iret=',iret
+
+    if (allsky_verbose) then
+       allocate(glon(grd_anl%nlon),glat(grd_anl%nlat))
+       dx=360./grd_anl%nlon
+       dy=180./(grd_anl%nlat-1.)
+       do i=1,grd_anl%nlon
+          glon(i)=(i-1)*dx
+       end do
+       do j=1,grd_anl%nlat
+          glat(j)=-90.0+(j-1)*dy
+       end do
+       open(33,file=trim(grdfile)//'.dat',form='unformatted',access='stream')
+       write(33)real(grd_anl%nlon,4),real(grd_anl%nlat,4),real(grd_anl%nsig,4), &
+                real(nc3d,4), real(nc2d,4)
+       write(33) glon
+       write(33) glat
+       deallocate(glon,glat)
+    endif
+
   endif
 
 ! Process 3d arrays
@@ -659,6 +684,9 @@ subroutine write_spread_dualres(ibin,bundle)
       end do
       call wryte(22,mem3d,work4_3d)
       write(6,*)'WRITE_SPREAD_DUALRES FOR VARIABLE NUM ',n
+      if (allsky_verbose) then
+         write(33) work4_3d
+      endif
     endif
   end do
 
@@ -675,6 +703,9 @@ subroutine write_spread_dualres(ibin,bundle)
        end do
        call wryte(22,mem2d,work4_2d)
        write(6,*)'WRITE_SPREAD_DUALRES FOR 2D FIELD '
+       if (allsky_verbose) then
+          write(33) work4_2d
+       endif
     endif
   end do
 
@@ -682,6 +713,9 @@ subroutine write_spread_dualres(ibin,bundle)
   if (mype==0) then
      call baclose(22,iret)
      write(6,*)'WRITE_SPREAD_DUALRES:  close 22 with iret=',iret
+     if (allsky_verbose) then
+        close(33)
+     endif
   end if
 
 ! Get reference pressure levels for grads purposes
@@ -691,7 +725,7 @@ subroutine write_spread_dualres(ibin,bundle)
   if (mype==0) then
      write(grdctl,'(a,i3.3,a)') 'ens_spread_',ibin, '.ctl'
      open(newunit=lu,file=trim(grdctl),form='formatted')
-     write(lu,'(2a)') 'DSET  ^', trim(grdfile)
+     write(lu,'(2a)') 'DSET  ^', trim(grdfile)//'.grd'
      write(lu,'(2a)') 'TITLE ', 'gsi ensemble spread'
      write(lu,'(a,2x,e13.6)') 'UNDEF', 1.E+15 ! any other preference for this?
      write(lu,'(a,2x,i4,2x,a,2x,f5.1,2x,f9.6)') 'XDEF',grd_anl%nlon, 'LINEAR',   0.0, 360./grd_anl%nlon

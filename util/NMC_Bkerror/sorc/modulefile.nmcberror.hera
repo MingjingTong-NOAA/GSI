@@ -1,0 +1,16 @@
+#%Module#####################################################
+## Module file for regrid_nemsio
+#############################################################
+
+module load intel
+module load impi
+export NCEPLIBS=/scratch2/NCEPDEV/nwprod/NCEPLIBS
+module use -a $NCEPLIBS/modulefiles
+
+module load sigio/2.1.1
+module load bacio/2.0.2
+module load nemsio/2.2.3
+module load w3emc/2.3.1
+module load w3nco/2.0.6
+module load sp/2.0.2
+

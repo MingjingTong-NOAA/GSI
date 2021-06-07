@@ -119,7 +119,7 @@ contains
     use general_sub2grid_mod, only: sub2grid_info,general_sub2grid_create_info,general_sub2grid_destroy_info
     use mpimod, only: npe,mype
     use mpeu_util, only: die
-    use cloud_efr_mod, only: cloud_calc_gfs,set_cloud_lower_bound    
+    use cloud_efr_mod, only: cloud_calc_gfs,set_cloud_bound    
     use general_specmod, only: general_init_spec_vars,general_destroy_spec_vars,spec_vars
     implicit none
 
@@ -218,7 +218,6 @@ contains
                        associated(ges_qi_it)  .and.&
                        associated(ges_tv_it)
 
-!      call set_cloud_lower_bound(ges_cwmr_it)
        if (mype==0) write(6,*)'READ_GFS: l_cld_derived = ', l_cld_derived
 
        if (l_cld_derived) then
@@ -1443,20 +1442,15 @@ end subroutine write_ghg_grid
                 call write_fv3_increment(grd_a,sp_a,filename,mype_atm, &
                      atm_bundle,itoutsig)
             else
-                if (fv3_full_hydro) then
-                   call write_fv3atm_nems(grd_a,sp_a,filename,mype_atm, &
-                        atm_bundle,itoutsig)
+                ! if using aerosols, optional chem_bundle argument
+                if ( laeroana_gocart ) then
+                    call write_nemsatm(grd_a,sp_a,filename,mype_atm, &
+                         atm_bundle,itoutsig,chem_bundle)
                 else
-                   ! if using aerosols, optional chem_bundle argument
-                   if ( laeroana_gocart ) then
-                       call write_nemsatm(grd_a,sp_a,filename,mype_atm, &
-                            atm_bundle,itoutsig,chem_bundle)
-                   else
-                   ! otherwise, just atm_bundle
-                       call write_nemsatm(grd_a,sp_a,filename,mype_atm, &
-                            atm_bundle,itoutsig)
-                   end if ! laeroana_gocart
-                endif  
+                ! otherwise, just atm_bundle
+                    call write_nemsatm(grd_a,sp_a,filename,mype_atm, &
+                         atm_bundle,itoutsig)
+                end if ! laeroana_gocart
             end if
 
         else if ( use_gfs_ncio ) then

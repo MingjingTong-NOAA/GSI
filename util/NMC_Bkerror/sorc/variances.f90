@@ -307,8 +307,10 @@ subroutine variances(numcases,mype)
            qvar(:,k)  = qvar(:,k)  / varscale(k)
            ozvar(:,k) = ozvar(:,k) / varscale(k)
            cvar(:,k)  = cvar(:,k)  / varscale(k)
+           nrhvar(:,k) = nrhvar(:,k) / varscale(k)
         endif
      enddo
+     
   endif
 
   call mpi_bcast(sfvar,nlat*nsig,mpi_rtype,mype_work,mpi_comm_world,ierror)

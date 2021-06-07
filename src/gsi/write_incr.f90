@@ -76,9 +76,9 @@ contains
     use general_sub2grid_mod, only: sub2grid_info
 
     use gsi_bundlemod, only: gsi_bundle, gsi_bundlegetpointer
-    use control_vectors, only: control_vector
+    use control_vectors, only: control_vector, cvars3d
 
-    use constants, only: one, rad2deg, r1000
+    use constants, only: one, rad2deg, r1000, qmin, qcmin
 
     use gsi_4dcouplermod, only : gsi_4dcoupler_grtests
     use gsi_4dvar, only: nobs_bins, l4dvar, nsubwin, l4densvar
@@ -90,7 +90,8 @@ contains
                            ges_q1, ifilesig
     use obsmod, only: ianldate 
     use state_vectors, only: allocate_state, deallocate_state
-
+    use mpeu_util, only: getindex
+    
     implicit none
 
 ! !INPUT PARAMETERS:
@@ -107,6 +108,7 @@ contains
     real(r_kind),pointer,dimension(:,:,:) :: sub_u,sub_v
     real(r_kind),pointer,dimension(:,:,:) :: sub_qanl,sub_oz
     real(r_kind),pointer,dimension(:,:,:) :: sub_ql, sub_qi
+    real(r_kind),pointer,dimension(:,:,:) :: sub_qr, sub_qs, sub_qg
     real(r_kind),pointer,dimension(:,:) :: sub_ps
 
     real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig) :: sub_dzb,sub_dza, sub_tsen, sub_q
@@ -115,6 +117,7 @@ contains
     real(r_kind),dimension(grd%lat1,grd%lon1,grd%nsig):: tsensm, usm, vsm
     real(r_kind),dimension(grd%lat1,grd%lon1,grd%nsig):: qsm, ozsm
     real(r_kind),dimension(grd%lat1,grd%lon1,grd%nsig):: qism, qlsm 
+    real(r_kind),allocatable,dimension(:,:,:) :: qrsm, qssm, qgsm
     real(r_kind),dimension(grd%lat1,grd%lon1,grd%nsig):: dzsm
     real(r_kind),dimension(grd%lat1,grd%lon1,grd%nsig):: delp
     real(r_kind),dimension(grd%nlon) :: deglons
@@ -128,14 +131,15 @@ contains
     integer(i_kind) :: ncid_out, lon_dimid, lat_dimid, lev_dimid, ilev_dimid
     integer(i_kind) :: lonvarid, latvarid, levvarid, pfullvarid, ilevvarid, &
                        hyaivarid, hybivarid, uvarid, vvarid, delpvarid, delzvarid, &
-                       tvarid, sphumvarid, liqwatvarid, o3varid, icvarid
+                       tvarid, sphumvarid, liqwatvarid, o3varid, icvarid, &
+                       rwvarid, snvarid, grlevarid
     integer(i_kind) :: dimids3(3),nccount(3),ncstart(3), cnksize(3), j1, j2
 
     type(gsi_bundle) :: svalinc(nobs_bins)
     type(gsi_bundle) :: evalinc(ntlevs_ens)
     type(gsi_bundle) :: mvalinc(nsubwin)
     type(predictors) :: sbiasinc
-    logical llprt
+    logical llprt, lqr, lqs, lqg
 
     integer(i_kind),dimension(grd%lat1,grd%lon1) :: troplev
 
@@ -148,6 +152,10 @@ contains
     llprt=(mype==0).and.(iter<=1)
     ibin2 = ibin
     if (.not. l4densvar) ibin2 = 1
+
+    lqr=getindex(cvars3d,'qr')>0
+    lqs=getindex(cvars3d,'qs')>0
+    lqg=getindex(cvars3d,'qg')>0
 
 !   set up state space based off of xhatsave
 !   Convert from control space directly to physical
@@ -192,6 +200,12 @@ contains
     call gsi_bundlegetpointer(gfs_bundle,'q', sub_qanl, iret); istatus=istatus+iret
     call gsi_bundlegetpointer(svalinc(ibin2),'ql', sub_ql, iret); istatus=istatus+iret
     call gsi_bundlegetpointer(svalinc(ibin2),'qi', sub_qi, iret); istatus=istatus+iret
+    if (lqr) &
+    call gsi_bundlegetpointer(svalinc(ibin2),'qr', sub_qr, iret); istatus=istatus+iret
+    if (lqs) &
+    call gsi_bundlegetpointer(svalinc(ibin2),'qs', sub_qs, iret); istatus=istatus+iret
+    if (lqg) &
+    call gsi_bundlegetpointer(svalinc(ibin2),'qg', sub_qg, iret); istatus=istatus+iret
     call gsi_bundlegetpointer(svalinc(ibin2),'oz', sub_oz, iret); istatus=istatus+iret
     call gsi_bundlegetpointer(svalinc(ibin2),'u', sub_u, iret); istatus=istatus+iret
     call gsi_bundlegetpointer(svalinc(ibin2),'v', sub_v, iret); istatus=istatus+iret
@@ -241,6 +255,13 @@ contains
     call nccheck_incr(nf90_var_par_access(ncid_out, o3varid, nf90_collective))
     call nccheck_incr(nf90_def_var(ncid_out, "icmr_inc", nf90_real, dimids3, icvarid)) 
     call nccheck_incr(nf90_var_par_access(ncid_out, icvarid, nf90_collective))
+    call nccheck_incr(nf90_def_var(ncid_out, "rwmr_inc", nf90_real, dimids3, rwvarid))
+    call nccheck_incr(nf90_var_par_access(ncid_out, rwvarid, nf90_collective))
+    call nccheck_incr(nf90_def_var(ncid_out, "snmr_inc", nf90_real, dimids3, snvarid))
+    call nccheck_incr(nf90_var_par_access(ncid_out, snvarid, nf90_collective))
+    call nccheck_incr(nf90_def_var(ncid_out, "grle_inc", nf90_real, dimids3, grlevarid))
+    call nccheck_incr(nf90_var_par_access(ncid_out, grlevarid, nf90_collective))
+
     ! place global attributes to parallel calc_increment output
     call nccheck_incr(nf90_put_att(ncid_out, nf90_global, "source", "GSI"))
     call nccheck_incr(nf90_put_att(ncid_out, nf90_global, "comment", &
@@ -276,6 +297,18 @@ contains
     call strip(sub_q   ,qsm   ,grd%nsig)
     call strip(sub_ql  ,qlsm  ,grd%nsig)
     call strip(sub_qi  ,qism  ,grd%nsig)
+    if (lqr ) then
+       allocate(qrsm(grd%lat1,grd%lon1,grd%nsig))
+       call strip(sub_qr  ,qrsm  ,grd%nsig)
+    end if
+    if (lqs ) then
+       allocate(qssm(grd%lat1,grd%lon1,grd%nsig))
+       call strip(sub_qs  ,qssm  ,grd%nsig)
+    end if
+    if (lqg ) then
+       allocate(qgsm(grd%lat1,grd%lon1,grd%nsig))
+       call strip(sub_qg  ,qgsm  ,grd%nsig)
+    end if
     call strip(sub_oz  ,ozsm  ,grd%nsig)
     call strip(sub_ps  ,pssm  )
     call strip(sub_u   ,usm   ,grd%nsig)
@@ -445,8 +478,62 @@ contains
     call nccheck_incr(nf90_put_var(ncid_out, icvarid, sngl(out3d), &
                       start = ncstart, count = nccount))
     call mpi_barrier(mpi_comm_world,ierror)
+    ! rain mixing ratio increment
+    if (lqr) then
+       do k=1,grd%nsig
+          krev = grd%nsig+1-k
+          if (zero_increment_strat('rwmr_inc')) then
+            call zero_inc_strat(qrsm(:,:,k), k, troplev)
+          end if
+          if (should_zero_increments_for('rwmr_inc')) qrsm(:,:,k) = 0.0_r_kind
+          out3d(:,:,krev) = transpose(qrsm(j1:j2,:,k))
+       end do
+    else
+       out3d = 0.0_r_kind
+    end if
+    call nccheck_incr(nf90_put_var(ncid_out, rwvarid, sngl(out3d), &
+                      start = ncstart, count = nccount))
+    call mpi_barrier(mpi_comm_world,ierror)
+    ! snow mixing ratio increment
+    if (lqs) then
+       do k=1,grd%nsig
+          krev = grd%nsig+1-k
+          if (zero_increment_strat('snmr_inc')) then
+            call zero_inc_strat(qssm(:,:,k), k, troplev)
+          end if
+          if (should_zero_increments_for('snmr_inc')) qssm(:,:,k) = 0.0_r_kind
+          out3d(:,:,krev) = transpose(qssm(j1:j2,:,k))
+       end do
+    else
+       out3d = 0.0_r_kind
+    end if
+    call nccheck_incr(nf90_put_var(ncid_out, snvarid, sngl(out3d), &
+                      start = ncstart, count = nccount))
+    call mpi_barrier(mpi_comm_world,ierror)
+    ! graupel mixing ratio increment
+    if (lqg) then
+       do k=1,grd%nsig
+          krev = grd%nsig+1-k
+          if (zero_increment_strat('grle_inc')) then
+            call zero_inc_strat(qgsm(:,:,k), k, troplev)
+          end if 
+          if (should_zero_increments_for('grle_inc')) qgsm(:,:,k) = 0.0_r_kind
+          out3d(:,:,krev) = transpose(qgsm(j1:j2,:,k))
+       end do
+    else
+       out3d = 0.0_r_kind
+    end if
+    call nccheck_incr(nf90_put_var(ncid_out, grlevarid, sngl(out3d), &
+                      start = ncstart, count = nccount))
+    call mpi_barrier(mpi_comm_world,ierror)
+
 !    ! cleanup and exit
     call nccheck_incr(nf90_close(ncid_out))
+
+    if (allocated(qrsm)) deallocate(qrsm)
+    if (allocated(qssm)) deallocate(qssm)
+    if (allocated(qgsm)) deallocate(qgsm)
+
     if ( mype == mype_out ) then
        write(6,*) "FV3 netCDF increment written, file= "//trim(filename)//".nc"
     end if

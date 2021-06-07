@@ -155,7 +155,7 @@ $NLN $VLOCALEIG  vlocal_eig.dat
 $NLN $COMOUT_ANL_ENS/$GBIASe satbias_in
 
 ################################################################################
-
+SCDATE=$($NDATE +6 $FDATE)
 if [ $USE_CFP = "YES" ]; then
    [[ -f $DATA/untar.sh ]] && rm $DATA/untar.sh
    [[ -f $DATA/mp_untar.sh ]] && rm $DATA/mp_untar.sh
@@ -163,7 +163,11 @@ if [ $USE_CFP = "YES" ]; then
    cat > $DATA/untar.sh << EOFuntar
 #!/bin/sh
 memchar=\$1
-flist="$CNVSTAT $OZNSTAT $RADSTAT"
+if [[ $CDATE -le $SCDATE && $EXP_WARM_START = ".false." && ! -f $RADSTAT ]]; then
+   flist="$CNVSTAT $OZNSTAT"
+else
+   flist="$CNVSTAT $OZNSTAT $RADSTAT"
+fi
 for ftype in \$flist; do
    if [ \$memchar = "ensmean" ]; then
       fname=$COMOUT_ANL_ENS/\${ftype}.ensmean
@@ -179,8 +183,11 @@ fi
 
 ################################################################################
 # Ensemble guess, observational data and analyses/increments
-
-flist="$CNVSTAT $OZNSTAT $RADSTAT"
+if [[ $CDATE -le $SCDATE && $EXP_WARM_START = ".false." && ! -f $RADSTAT ]]; then
+   flist="$CNVSTAT $OZNSTAT"
+else
+   flist="$CNVSTAT $OZNSTAT $RADSTAT"
+fi
 if [ $USE_CFP = "YES" ]; then
    echo "$nm $DATA/untar.sh ensmean" | tee -a $DATA/mp_untar.sh
    if [ ${CFP_MP:-"NO"} = "YES" ]; then

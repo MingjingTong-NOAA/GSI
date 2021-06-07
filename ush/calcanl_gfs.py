@@ -15,9 +15,9 @@ import datetime
 
 # function to calculate analysis from a given increment file and background
 def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
-                ComIn_Ges, GPrefix, GSuffix,
-                FixDir, atmges_ens_mean, RunDir, NThreads, NEMSGet, IAUHrs,
-                ExecCMD, ExecCMDMPI, ExecAnl, ExecChgresInc, Cdump):
+                ComIn_Ges, GPrefix, GSuffix, FixDir, atmges_ens_mean, 
+                RunDir, NThreads, NEMSGet, IAUHrs, ExecCMD, ExecCMDMPI, 
+                ExecAnl, ExecChgresInc, Cdump, nvar, cliptracers):
     print('calcanl_gfs beginning at: ',datetime.datetime.utcnow())
 
     IAUHH = IAUHrs
@@ -141,7 +141,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
     ExecCMDMPI1 = ExecCMDMPI.replace("$ncmd",str(1))
     ExecCMDMPI = ExecCMDMPI.replace("$ncmd",str(nFH))
     ExecCMDLevs = ExecCMDMPI.replace("$ncmd",str(levs))
-    ExecCMDMPI10 = ExecCMDMPI.replace("$ncmd",str(10))
+    ExecCMDMPI10 = ExecCMDMPI.replace("$ncmd",str(nvar))
 
     # are we using mpirun with lsf, srun, or aprun with Cray?
     launcher = ExecCMDMPI.split(' ')[0]
@@ -162,7 +162,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
             ExecCMDMPILevs_host = 'mpirun -np '+str(levs)+' --hostfile hosts'
             ExecCMDMPILevs_nohost = 'mpirun -np '+str(levs)
         ExecCMDMPI1_host = 'mpirun -np 1 --hostfile hosts'
-        ExecCMDMPI10_host = 'mpirun -np 10 --hostfile hosts'
+        ExecCMDMPI10_host = 'mpirun -np %s --hostfile hosts'%(nvar)
     elif launcher == 'srun':
         nodes = os.getenv('SLURM_JOB_NODELIST','')
         hosts_tmp = subprocess.check_output('scontrol show hostnames '+nodes, shell=True)
@@ -187,7 +187,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
             ExecCMDMPILevs_host = 'srun -n '+str(levs)+' --verbose --export=ALL -c 1 --distribution=arbitrary --cpu-bind=cores'
             ExecCMDMPILevs_nohost = 'srun -n '+str(levs)+' --verbose --export=ALL'
         ExecCMDMPI1_host = 'srun -n 1 --verbose --export=ALL -c 1 --distribution=arbitrary --cpu-bind=cores'
-        ExecCMDMPI10_host = 'srun -n 10 --verbose --export=ALL -c 1 --distribution=arbitrary --cpu-bind=cores'
+        ExecCMDMPI10_host = 'srun -n %s --verbose --export=ALL -c 1 --distribution=arbitrary --cpu-bind=cores'%(nvar)
     elif launcher == 'aprun':
         hostfile = os.getenv('LSB_DJOB_HOSTFILE','')
         with open(hostfile) as f:
@@ -200,7 +200,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
         ExecCMDMPILevs_host = 'aprun -l hosts -d '+str(NThreads)+' -n '+str(levs)
         ExecCMDMPILevs_nohost = 'aprun -d '+str(NThreads)+' -n '+str(levs)
         ExecCMDMPI1_host = 'aprun -l hosts -d '+str(NThreads)+' -n 1'
-        ExecCMDMPI10_host = 'aprun -l hosts -d '+str(NThreads)+' -n 10'
+        ExecCMDMPI10_host = 'aprun -l hosts -d '+str(NThreads)+' -n %s'%(nvar)
     else:
         print('unknown MPI launcher. Failure.')
         sys.exit(1)
@@ -221,6 +221,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
                                 "lev": levs,
                                 "infile": "'siginc.nc."+format(fh, '02')+"'",
                                 "outfile": "'inc.fullres."+format(fh, '02')+"'",
+                                "nvar": nvar
                                 }
             gsi_utils.write_nml(namelist, CalcAnlDir+'/fort.43')
 
@@ -229,7 +230,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
             with open(CalcAnlDir+'/hosts', 'w') as hostfile:
                 hostfile.write(hosts[ihost]+'\n')
                 if launcher == 'srun': # need to write host per task not per node for slurm
-                    for a in range(0,9): # need 9 more of the same host for the 10 tasks for chgres_inc
+                    for a in range(0,nvar-1): # need 9 more of the same host for the 10 tasks for chgres_inc
                         hostfile.write(hosts[ihost]+'\n')
             if launcher == 'srun':
                 os.environ['SLURM_HOSTFILE'] = CalcAnlDir+'/hosts'
@@ -257,6 +258,7 @@ def calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
                           "firstguess_filename": "'ges'",
                           "increment_filename": "'inc.fullres'",
                           "fhr": 6,
+                          "cliptracers": cliptracers
                           }
 
     gsi_utils.write_nml(namelist, CalcAnlDir6+'/calc_analysis.nml')
@@ -342,10 +344,12 @@ if __name__ == '__main__':
     NEMSGet = os.getenv('NEMSIOGET','nemsio_get')
     IAUHrs = list(map(int,os.getenv('IAUFHRS','6').split(',')))
     Cdump = os.getenv('CDUMP', 'gdas')
+    nvar = int(os.getenv('calcanl_nvar', 10))
+    cliptracers = os.getenv('cliptracers', '.false.')
 
     print(locals())
     calcanl_gfs(DoIAU, l4DEnsVar, Write4Danl, ComOut, APrefix, ASuffix,
                 ComIn_Ges, GPrefix, GSuffix,
                 FixDir, atmges_ens_mean, RunDir, NThreads, NEMSGet, IAUHrs,
                 ExecCMD, ExecCMDMPI, ExecAnl, ExecChgresInc,
-                Cdump)
+                Cdump,nvar,cliptracers)

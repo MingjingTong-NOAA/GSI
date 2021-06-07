@@ -243,6 +243,7 @@ contains
 
 !   get work pe:
 
+    workpe=0
     allocate(numlevs(0:g1%npe-1))
     numlevs(0:g1%npe-1)=g1%kend(0:g1%npe-1)-g1%kbegin(0:g1%npe-1)+1
     if(g1%mype==0) then

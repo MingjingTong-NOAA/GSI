@@ -186,7 +186,7 @@ module qcmod
   public :: pboto3,ptopo3,pbotq,ptopq,newvad,tdrerr_inflate
   public :: igood_qc,ifail_crtm_qc,ifail_satinfo_qc,ifail_interchan_qc,&
             ifail_gross_qc,ifail_cloud_qc,ifail_outside_range,&
-            ifail_scanedge_qc, ifail_emiss_qc, ifail_cao_qc
+            ifail_scanedge_qc, ifail_emiss_qc, ifail_cao_qc, ifail_outside_symnorm
   public :: ifail_iland_det, ifail_isnow_det, ifail_iice_det, ifail_iwater_det,&
             ifail_imix_det, ifail_iomg_det, ifail_isst_det, ifail_itopo_det,&
             ifail_iwndspeed_det
@@ -253,6 +253,8 @@ module qcmod
   integer(i_kind),parameter:: ifail_outside_range=11
 !  Reject due to cold-air outbreak area check  in setuprad
   integer(i_kind),parameter:: ifail_cao_qc=12
+!  Reject because d/t > delta
+  integer(i_kind),parameter:: ifail_outside_symnorm=13
 !  Failures specific to qc routine start at 50 and the numbers overlap
 !  QC_SSMI failures 
 !  Reject due to krain type not equal to 0 in subroutine qc_ssmi
@@ -2750,6 +2752,8 @@ subroutine qc_amsua(nchanl,is,ndat,nsig,npred,sea,land,ice,snow,mixed,luse,   &
 !     ts           - skin temperature sensitivity
 !     pred         - bias correction predictors
 !     predchan     - bias correction coefficients
+!     cldeff_obs   - observed cloud effect
+!     cldeff_fg    - first guess cloud effect
 !     id_qc        - qc index - see qcmod definition
 !     aivals       - array holding sums for various statistics as a function of obs type
 !     errf         - criteria of gross error
@@ -2760,7 +2764,6 @@ subroutine qc_amsua(nchanl,is,ndat,nsig,npred,sea,land,ice,snow,mixed,luse,   &
 !     aivals       - array holding sums for various statistics as a function of obs type
 !     errf         - criteria of gross error
 !     varinv       - observation weight (modified obs var error inverse)
-!     cldeff_obs   - observed cloud effect 
 !     factch6      - precipitation screening using channel 6 
 !
 ! attributes:
@@ -3535,6 +3538,7 @@ subroutine qc_atms(nchanl,is,ndat,nsig,npred,sea,land,ice,snow,mixed,luse,   &
 !     errf         - criteria of gross error
 !     varinv       - observation weight (modified obs var error inverse)
 !     cldeff_obs   - observed cloud effect 
+!     cldeff_fg    - first guess cloud effect
 !
 ! output argument list:
 !     id_qc        - qc index - see qcmod definition

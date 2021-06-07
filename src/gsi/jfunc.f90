@@ -47,6 +47,7 @@ module jfunc
 !   2014-05-07  pondeca - add facthowv
 !   2014-06-18  carley/zhu - add lcbas and tcamt
 !   2015-07-10  pondeca - add factcldch
+!   2018-03-05  tong    - add clip_hydrometeor
 !   2018-05-19  eliu    - add control factors (factql,factqi, ....) for hydrometeors 
 !
 ! Subroutines Included:
@@ -137,10 +138,11 @@ module jfunc
   public :: factg,factv,factp,factl,R_option,factw10m,facthowv,factcldch,diag_precon,step_start
   public :: pseudo_q2
   public :: varq
+  public :: clip_hydrometeor
   public :: cnvw_option
 
   logical first,last,switch_on_derivatives,tendsflag,print_diag_pcg,tsensible,lgschmidt,diag_precon
-  logical clip_supersaturation,R_option
+  logical clip_supersaturation,R_option,clip_hydrometeor
   logical pseudo_q2
   logical cnvw_option
   integer(i_kind) iout_iter,miter,iguess,nclen,qoption,cwoption
@@ -211,6 +213,7 @@ contains
     factqs=zero
     factqg=zero
     clip_supersaturation=.false.
+    clip_hydrometeor=.true.
     factg=zero
     factv=zero
     factp=zero

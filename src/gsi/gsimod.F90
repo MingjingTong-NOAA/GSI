@@ -69,7 +69,8 @@
                        ssmis_method,ssmis_precond,gmi_method,amsr2_method,bias_zero_start, &
                        reset_bad_radbc,cld_det_dec2bin,diag_version,lupdqc,lqcoef
   use radinfo, only: tzr_qc,tzr_bufrsave
-  use radinfo, only: crtm_coeffs_path
+  use radinfo, only: crtm_coeffs_path,crtm_overlap,rewopt,reiopt, &
+                     crtm_gfdl,allsky_verbose,cloud_mask_option,mask_threshold
   use ozinfo, only: diag_ozone,init_oz
   use aeroinfo, only: diag_aero, init_aero, init_aero_vars, final_aero_vars
   use coinfo, only: diag_co,init_co
@@ -96,7 +97,7 @@
      factv,factl,factp,factg,factw10m,facthowv,factcldch,niter,niter_no_qc,biascor,&
      init_jfunc,qoption,cwoption,switch_on_derivatives,tendsflag,jiterstart,jiterend,R_option,&
      bcoption,diurnalbc,print_diag_pcg,tsensible,lgschmidt,diag_precon,step_start,pseudo_q2,&
-     clip_supersaturation,cnvw_option
+     clip_supersaturation,cnvw_option,clip_hydrometeor
   use state_vectors, only: init_anasv,final_anasv
   use control_vectors, only: init_anacv,final_anacv,nrf,nvars,nrf_3d,cvars3d,cvars2d,&
      nrf_var,lcalc_gfdl_cfrac,incvars_to_zero,incvars_zero_strat,incvars_efold 
@@ -122,7 +123,7 @@
      nlayers,use_gfs_ozone,check_gfs_ozone_date,regional_ozone,jcap,jcap_b,vlevs,&
      use_gfs_nemsio,sfcnst_comb,use_readin_anl_sfcmask,use_sp_eqspace,final_grid_vars,&
      jcap_gfs,nlat_gfs,nlon_gfs,jcap_cut,wrf_mass_hybridcord,use_gfs_ncio,write_fv3_incr,&
-     use_fv3_aero
+     use_fv3_aero,dlnpm_ratio
   use guess_grids, only: ifact10,sfcmod_gfs,sfcmod_mm5,use_compress,nsig_ext,gpstop
   use gsi_io, only: init_io,lendian_in,verbose,print_obs_para
   use regional_io_mod, only: regional_io_class
@@ -394,6 +395,8 @@
 !  02-15-2016 Y. Wang, Johnson, X. Wang - added additional options if_vterminal, if_model_dbz,
 !                                         for radar DA, POC: xuguang.wang@ou.edu
 !  08-31-2017 Li        add sfcnst_comb for option to read sfc & nst combined file 
+!  02-21-2018 Tong      move initializing derivative vector here
+!  03-05-2018 Tong      add clip_hydrometeor to setup namelist
 !  10-10-2017 Wu,W      added option fv3_regional and rid_ratio_fv3_regional, setup FV3, earthuv
 !  01-11-2018 Yang      add namelist variables required by the nonlinear transform to vis and cldch
 !                      (Jim Purser 2018). Add estvisoe and estcldchoe to replace the hardwired 
@@ -460,6 +463,7 @@
 !     factqmin - weighting factor for negative moisture constraint
 !     factqmax - weighting factor for supersaturated moisture constraint
 !     clip_supersaturation - flag to remove supersaturation during each outer loop default=.false.
+!     clip_hydrometeor - flag to set lower bound for hydrometers
 !     deltim   - model timestep
 !     dtphys   - physics timestep
 !     biascor  - background error bias correction coefficient
@@ -540,6 +544,24 @@
 !     oberror_tune - logical flag to tune oberror table  (true=on)
 !     perturb_fact -  magnitude factor for observation perturbation
 !     crtm_coeffs_path - path of directory w/ CRTM coeffs files
+!     crtm_overlap  - cloud overlap options
+!                     crtm_overlap = 1, Maximum overlap
+!                     crtm_overlap = 2, Random overlap
+!                     crtm_overlap = 3, Maximum random overlap
+!                     crtm_overlap = 4, Average overlap
+!                     crtm_overlap = 5, Overcase overlap
+!     rewopt        - Options to compute cloud water effective radius
+!                     = 1, martin et al., 1994
+!                     = 2, martin et al., 1994, gfdl revision
+!                     = 3, martin et al., 1994, emc version
+!                     = 4, kiehl et al., 1994
+!                     = 5, kiehl, 1994
+!     reiopt        - Options to compute cloud ice effective radius
+!                     = 1, heymsfield and mcfarquhar, 1996
+!                     = 2, donner et al., 1997
+!                     = 3, fu, 2007
+!                     = 4, kristjansson et al., 2000
+!                     = 5, wyser, 1998
 !     print_diag_pcg - logical turn on of printing of GMAO diagnostics in pcgsoi.f90
 !     preserve_restart_date - if true, then do not update regional restart file date.
 !     tsensible - option to use sensible temperature as the analysis variable. works
@@ -652,7 +674,7 @@
 !     NOTE:  for now, if in regional mode, then iguess=-1 is forced internally.
 !            add use of guess file later for regional mode.
 
-  namelist/setup/gencode,factqmin,factqmax,clip_supersaturation, &
+  namelist/setup/gencode,factqmin,factqmax,clip_supersaturation,clip_hydrometeor, &
        factql,factqi,factqr,factqs,factqg, &     
        factv,factl,factp,factg,factw10m,facthowv,factcldch,R_option,deltim,dtphys,&
        biascor,bcoption,diurnalbc,&
@@ -666,7 +688,8 @@
        oneobtest,sfcmodel,dtbduv_on,ifact10,l_foto,offtime_data,&
        use_pbl,use_compress,nsig_ext,gpstop,&
        perturb_obs,perturb_fact,oberror_tune,preserve_restart_date, &
-       crtm_coeffs_path,berror_stats,tcp_posmatch,tcp_box, &
+       crtm_coeffs_path,crtm_overlap,rewopt,reiopt,crtm_gfdl,allsky_verbose, &
+       cloud_mask_option,mask_threshold,berror_stats,tcp_posmatch,tcp_box, &
        newpc4pred,adp_anglebc,angord,passive_bc,use_edges,emiss_bc,upd_pred,reset_bad_radbc,&
        ssmis_method, ssmis_precond, gmi_method, amsr2_method, bias_zero_start, &
        ec_amv_qc, lobsdiagsave, lobsdiag_forenkf, &
@@ -733,7 +756,7 @@
 
   namelist/gridopts/jcap,jcap_b,nsig,nlat,nlon,nlat_regional,nlon_regional,&
        diagnostic_reg,update_regsfc,netcdf,regional,wrf_nmm_regional,nems_nmmb_regional,fv3_regional,&
-       wrf_mass_regional,twodvar_regional,filled_grid,half_grid,nvege_type,nlayers,cmaq_regional,&
+       wrf_mass_regional,twodvar_regional,filled_grid,half_grid,nvege_type,nlayers,dlnpm_ratio,cmaq_regional,&
        nmmb_reference_grid,grid_ratio_nmmb,grid_ratio_fv3_regional,grid_ratio_wrfmass,jcap_gfs,jcap_cut,&
        wrf_mass_hybridcord
 

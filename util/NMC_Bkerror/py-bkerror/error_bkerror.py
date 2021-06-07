@@ -53,15 +53,15 @@ print 'hscalespin.shape: ', hscalespin2.shape
 
 print
 print 'differences'
-print 'agvin ', np.abs(agvin1-agvin2).max()
-print 'bgvin ', np.abs(bgvin1-bgvin2).max()
-print 'wgvin ', np.abs(wgvin1-wgvin2).max()
-print 'corzin ', np.abs(corzin1-corzin2).max()
-print 'hscalesin ', np.abs(hscalesin1-hscalesin2).max()
-print 'vscalesin ', np.abs(vscalesin1-vscalesin2).max()
-print 'corq2in ', np.abs(corq2in1-corq2in2).max()
-print 'corsstin ', np.abs(corsstin1-corsstin2).max()
-print 'hsstin ', np.abs(hsstin1-hsstin2).max()
-print 'corpin ', np.abs(corpin1-corpin2).max()
-print 'hscalespin ', np.abs(hscalespin1-hscalespin2).max()
+print 'agvin ', np.abs(agvin1-agvin2).max(), np.abs(agvin1-agvin2).min()
+print 'bgvin ', np.abs(bgvin1-bgvin2).max(), np.abs(bgvin1-bgvin2).min()
+print 'wgvin ', np.abs(wgvin1-wgvin2).max(), np.abs(wgvin1-wgvin2).min()
+print 'corzin ', np.abs(corzin1-corzin2).max(), np.abs(corzin1-corzin2).min()
+print 'hscalesin ', np.abs(hscalesin1-hscalesin2).max(), np.abs(hscalesin1-hscalesin2).min()
+print 'vscalesin ', np.abs(vscalesin1-vscalesin2).max(), np.abs(vscalesin1-vscalesin2).min()
+print 'corq2in ', np.abs(corq2in1-corq2in2).max(), np.abs(corq2in1-corq2in2).min()
+print 'corsstin ', np.abs(corsstin1-corsstin2).max(), np.abs(corsstin1-corsstin2).min()
+print 'hsstin ', np.abs(hsstin1-hsstin2).max(), np.abs(hsstin1-hsstin2).min()
+print 'corpin ', np.abs(corpin1-corpin2).max(), np.abs(corpin1-corpin2).min()
+print 'hscalespin ', np.abs(hscalespin1-hscalespin2).max(), np.abs(hscalespin1-hscalespin2).min()
 

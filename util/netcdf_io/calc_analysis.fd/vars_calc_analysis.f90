@@ -23,6 +23,7 @@ module vars_calc_analysis
   public :: work1
   public :: nhrs_assim
   public :: use_nemsio_anl
+  public :: cliptracers
   public :: fcstncfile, anlncfile, incncfile
   public :: fhrs_pe
   public :: fhr
@@ -39,7 +40,7 @@ module vars_calc_analysis
   type(nemsio_gfile) :: anlfile
   real, allocatable, dimension(:) :: work1
   integer :: nhrs_assim, fhr
-  logical :: use_nemsio_anl
+  logical :: use_nemsio_anl, cliptracers
   type(Dataset) :: fcstncfile, anlncfile, incncfile
   integer, dimension(7) :: fhrs_pe
   integer :: mype, npes

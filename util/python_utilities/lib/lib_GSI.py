@@ -239,8 +239,8 @@ class GSIstat(object):
             df = self._cache[name]
             return df
 
-        if name in ['ps']:
-            df = self._get_ps()
+        if name in ['ps','sst','tcp']:
+            df = self._get_ps(name)
         elif name in ['oz']:
             df = self._get_ozone()
         elif name in ['uv', 't', 'q', 'gps']:
@@ -284,7 +284,7 @@ class GSIstat(object):
 
         return df
 
-    def extract_instrument(self, obtype, instrument):
+    def extract_instrument(self, obtype, instrument, plotanl=False, usedonly=True):
         '''
         From the gsistat file, extract detailed information on an instrument:
         INPUT:
@@ -310,6 +310,11 @@ class GSIstat(object):
             otype = self.extract(obtype)
             self._cache[obtype] = otype
 
+        # get usage 
+        df_usage = self._get_instrument_usage(instrument) 
+
+        #print 'usage', df_usage
+
         instruments = sorted(otype.index.get_level_values('instrument').unique())
         satellites  = sorted(otype.index.get_level_values('satellite' ).unique())
 
@@ -324,6 +329,16 @@ class GSIstat(object):
             inst = 'iasi'
         elif instrument in ['airs', 'airs281SUBSET']:
             inst = 'airs'
+        elif instrument in ['sndrd1']:
+            inst = 'sndrD1'
+        elif instrument in ['sndrd2']:
+            inst = 'sndrD2'
+        elif instrument in ['sndrd3']:
+            inst = 'sndrD3'
+        elif instrument in ['sndrd4']:
+            inst = 'sndrD4'
+        elif instrument in ['avhrr']:
+            inst = 'avhrr3'
         else:
             inst = instrument
 
@@ -334,33 +349,53 @@ class GSIstat(object):
                 tst = line.strip().split()
                 tst = tst[:2] + tst[2].split('_') + tst[3:]
                 tmp.append(tst)
-
-        columns = ['it', 'channel', 'instrument', 'satellite', 'nassim', 'nrej', 'oberr', 'OmF_bc', 'OmF_wobc', 'col1', 'col2', 'col3']
+    
+        columns = ['it', 'channel', 'instrument', 'satellite', 'nassim', 'nrej', 'oberr', 'OmF_wobc', 'OmF_bc', 'pen', 'OmFbc_rms', 'OmFbc_std']
         df = _pd.DataFrame(data=tmp,columns=columns)
-        df.drop(['col1', 'col2', 'col3'],inplace=True,axis=1) # future columns, drop!
+        df.drop(['pen', 'OmFbc_rms'],inplace=True,axis=1) # future columns, drop!
         df[['channel', 'nassim', 'nrej']] = df[['channel', 'nassim', 'nrej']].astype(_np.int)
-        df[['oberr', 'OmF_bc', 'OmF_wobc']] = df[['oberr', 'OmF_bc', 'OmF_wobc']].astype(_np.float)
+        df[['oberr', 'OmF_wobc', 'OmF_bc', 'OmFbc_std']] = df[['oberr', 'OmF_wobc', 'OmF_bc', 'OmFbc_std']].astype(_np.float)
+
 
         # Since iteration number is not readily available, make one
-        lendf = len(df)
-        nouter = lendf / len(df['it'].unique())
-        douter = lendf / nouter
-        it = _np.zeros(lendf, dtype=int)
-        for i in range(nouter):
-            its = douter * i
-            ite = douter * (i+1)
-            it[its:ite] = i+1
-        df['it'] = it
-
-        df = df[['it', 'instrument', 'satellite', 'channel', 'nassim', 'nrej', 'oberr', 'OmF_bc', 'OmF_wobc']]
-        df.set_index(['it', 'instrument', 'satellite', 'channel'],inplace=True)
-
+        if not df.empty:
+            lendf = len(df)
+            if lendf != 0:
+                itlist=df['it'].unique()
+                counts=df['it'].value_counts()
+                nouter = lendf / len(df['it'].unique())
+                if plotanl and nouter < 3:
+                    for k in itlist:
+                        if counts[k] < 3:
+                            print '%s %s appreas in only %s outer iteration'%(inst,k,counts[k])
+                            print 'drop the record'
+                            df = df[df.it != k] 
+                    lendf = len(df)
+                    nouter = lendf / len(df['it'].unique())
+    
+            if lendf != 0:
+                douter = lendf / nouter
+                it = _np.zeros(lendf, dtype=int)
+                for i in range(nouter):
+                    its = douter * i
+                    ite = douter * (i+1)
+                    it[its:ite] = i+1
+                df['it'] = it
+        
+                df = df[['it', 'instrument', 'satellite', 'channel', 'nassim', 'nrej', 'oberr', 'OmF_wobc', 'OmF_bc', 'OmFbc_std']]
+                df.set_index(['it', 'instrument', 'satellite', 'channel'],inplace=True)
+    
+            #_pd.set_option('display.max_rows', None)
+            if usedonly:
+                tmp = df.join(df_usage, how='inner')
+                df = tmp.loc[tmp['use'] == 1].drop(['use'],axis=1)
+    
         return df
 
     # Surface pressure Fit
-    def _get_ps(self):
+    def _get_ps(self,name):
         '''
-        Search for surface pressure
+        Search for surface pressure, sst, tcp
         '''
 
         pattern = 'obs\s+use\s+typ\s+styp'
@@ -371,10 +406,10 @@ class GSIstat(object):
                 break
 
         if header is None:
-            raise 'Unable to get header for ps'
+            raise 'Unable to get header for %s'%(name)
 
         tmp = []
-        pattern = ' o-g (\d\d) %7s' % 'ps'
+        pattern = ' o-g (\d\d) %7s' %(name)
         for line in self._lines:
             if _re.match(pattern, line):
                 # don't add "all" data, this is a sum of the subset (asm, rej, mon)
@@ -495,6 +530,51 @@ class GSIstat(object):
 
         return df
 
+    def _get_instrument_usage(self,instrument):
+        '''
+        Search for radiance info
+        '''
+
+        if instrument in ['iasi', 'iasi616']:
+            inst = 'iasi'
+        elif instrument in ['airs', 'airs281SUBSET']:
+            inst = 'airs'
+        elif instrument in ['sndrd1']:
+            inst = 'sndrD1'
+        elif instrument in ['sndrd2']:
+            inst = 'sndrD2'
+        elif instrument in ['sndrd3']:
+            inst = 'sndrD3'
+        elif instrument in ['sndrd4']:
+            inst = 'sndrD4'
+        elif instrument in ['avhrr']:
+            inst = 'avhrr3'
+        else:
+            inst = instrument
+
+        tmp = []
+        for line in self._lines:
+            #if _re.match(pattern, line):
+            if inst in line and 'use=' in line:
+                tst = line.strip().split()
+                tst = [1] + tst[1].split('_') + tst[3:4] + tst[9:10]
+                tmp.append(tst)
+
+        columns = ['it','instrument', 'satellite', 'channel', 'use']
+        tmpdf = _pd.DataFrame(data=tmp, columns=columns)
+        tmpdf2 = _pd.DataFrame(data=tmp, columns=columns)
+        tmpdf3 = _pd.DataFrame(data=tmp, columns=columns)
+        tmpdf2['it']=2
+        tmpdf3['it']=3
+        df = _pd.concat([tmpdf,tmpdf2])
+        df = _pd.concat([df,tmpdf3])
+        df[['it','channel','use']] = df[['it','channel','use']].astype(_np.int)
+        df.set_index(columns[:4], inplace=True)
+        #print 'df', df
+
+        return df
+
+
     # Minimization
     def _get_cost(self):
         '''
@@ -593,8 +673,14 @@ def kx_def():
         kx[key] = 'Profiler_Wind'
     for key in [224]:
         kx[key] = 'NEXRAD_Wind'
-    for key in [242,243,245,246,250,252,253]:
+    for key in [241,256]:
+        kx[key] = 'India_Wind'
+    for key in [242,250,252]:
+        kx[key] = 'JMA_Wind'
+    for key in [246,247,248,249,255]:
         kx[key] = 'Geo_Wind'
+    for key in [243,253,254]:
+        kx[key] = 'EUMETSAT_Wind'
     for key in [244]:
         kx[key] = 'AVHRR_Wind'
     for key in [257,258,259]:

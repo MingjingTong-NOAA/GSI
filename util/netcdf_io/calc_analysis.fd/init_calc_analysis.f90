@@ -14,7 +14,8 @@ contains
     !! read in namelist parameters from
     !! calc_analysis.nml file in same directory
     !! as executable
-    use vars_calc_analysis, only: anal_file, fcst_file, incr_file, use_nemsio_anl, fhr, mype, npes
+    use vars_calc_analysis, only: anal_file, fcst_file, incr_file, use_nemsio_anl, &
+                                  fhr, mype, npes, cliptracers
     implicit none
     ! local variables to this subroutine
     character(len=500) :: datapath = './'
@@ -24,10 +25,12 @@ contains
     character(len=2) :: hrstr
     integer, parameter :: lunit = 10
     logical :: lexist = .false.
-    namelist /setup/ datapath, analysis_filename, firstguess_filename, increment_filename, fhr, use_nemsio_anl
+    namelist /setup/ datapath, analysis_filename, firstguess_filename, &
+                     increment_filename, fhr, use_nemsio_anl, cliptracers
 
     fhr = 6 ! default to 6 hour cycle only
     use_nemsio_anl = .false. ! default to using netCDF for background and analysis
+    cliptracers = .false. ! default to clip tracers
 
     ! read in the namelist
     inquire(file='calc_analysis.nml', exist=lexist)

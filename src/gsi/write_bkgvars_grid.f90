@@ -1,4 +1,4 @@
-subroutine write_bkgvars_grid(a,b,c,d,mype)
+subroutine write_bkgvars_grid(a,b,c,d,mype,normalized)
 !$$$  subroutine documentation block
 !
 ! subprogram:    write_bkgvars_grid
@@ -34,6 +34,7 @@ subroutine write_bkgvars_grid(a,b,c,d,mype)
 
   real(r_kind),dimension(lat2,lon2,nsig),intent(in   ) :: a,b,c
   real(r_kind),dimension(lat2,lon2)     ,intent(in   ) :: d
+  logical, optional, intent(in)  :: normalized
 
   character(255):: grdfile
 
@@ -72,7 +73,11 @@ subroutine write_bkgvars_grid(a,b,c,d,mype)
      end do
 
 ! Create byte-addressable binary file for grads
-     grdfile='bkgvar_rewgt.grd'
+     if (present(normalized) .and. normalized) then
+        grdfile='bkgvar_rewgt_norm.grd' 
+     else
+        grdfile='bkgvar_rewgt.grd'
+     end if
      ncfggg=len_trim(grdfile)
      call baopenwt(22,grdfile(1:ncfggg),iret)
      call wryte(22,4*nlat*nlon*nsig,a4)
@@ -126,6 +131,7 @@ subroutine write_bkgvars2_grid
   use control_vectors, only: cvars3d,cvars2d,cvarsmd
   use berror, only: dssv,dssvs
   use file_utility, only : get_lun
+  use radinfo, only: allsky_verbose
   implicit none
 
   character(255):: grdfile
@@ -138,6 +144,9 @@ subroutine write_bkgvars2_grid
 
   real(r_kind)   ,dimension(nsig+1)::prs
   integer(i_kind) ncfggg,iret,lu,i,j,k,n
+
+  real(r_single),allocatable,dimension(:) :: glon,glat
+  real(r_kind) :: dx, dy
 
 ! gather stuff to processor 0
   do n=1,nc3d
@@ -220,7 +229,7 @@ subroutine write_bkgvars2_grid
 !    Now create corresponding grads table file
      lu=get_lun()
      open(lu,file='bkgvar_smooth.ctl',form='formatted')
-     write(lu,'(2a)') 'DSET  ^', trim(grdfile)
+     write(lu,'(2a)') 'DSET  ^', trim(grdfile)//'.grd'
      write(lu,'(2a)') 'TITLE ', 'gsi berror variances'
      write(lu,'(a,2x,e13.6)') 'UNDEF', 1.E+15 ! any other preference for this?
      write(lu,'(a,2x,i4,2x,a,2x,f5.1,2x,f9.6)') 'XDEF',nlon, 'LINEAR',   0.0, 360./nlon
@@ -239,6 +248,31 @@ subroutine write_bkgvars2_grid
      enddo
      write(lu,'(a)') 'ENDVARS'
      close(lu)
+
+     if (allsky_verbose) then
+        allocate(glon(nlon),glat(nlat))
+        dx=360./nlon
+        dy=180./(nlat-1.)
+        do i=1,nlon
+           glon(i)=(i-1)*dx
+        end do
+        do j=1,nlat
+           glat(j)=-90.0+(j-1)*dy
+        end do
+        lu=get_lun()
+        open(lu,file='bkgvar_smooth.dat',form='unformatted',access='stream')
+        write(lu)real(nlon,4),real(nlat,4),real(nsig,4),real(nc3d,4),real(nc2d+mvars,4)
+        write(lu) glon
+        write(lu) glat
+        do n=1,nc3d
+           write(lu) a4(:,:,:,n)
+        enddo
+        do n=1,nc2d+mvars
+           write(lu) d4(:,:,n)
+        enddo
+        deallocate(glon,glat)
+        close(lu)
+     endif
 
   end if ! mype=0
    

@@ -172,7 +172,7 @@ subroutine ens_spread_dualres_regional(en_bar)
      ps => dum2
   end if
 
-  call write_spread_dualres(st,vp,tv,rh,oz,cw,ps)
+  !call write_spread_dualres(st,vp,tv,rh,oz,cw,ps)
 
   return
 end subroutine ens_spread_dualres_regional

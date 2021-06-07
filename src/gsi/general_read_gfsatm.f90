@@ -2,7 +2,7 @@ module gfsreadmod
 
 contains
 subroutine general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-           icount,iflag,ilev,work,uvflag,vdflag,g_cf)  
+           icount,iflag,ilev,work,uvflag,vdflag)  
 ! !USES:
   use kinds, only: r_kind,i_kind
   use mpimod, only: npe,mpi_comm_world,ierror,mpi_rtype
@@ -23,7 +23,6 @@ subroutine general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr,
   real(r_kind),dimension(grd%lat2,grd%lon2),         intent(inout) :: g_z
   real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out) :: g_u,g_v,&
        g_vor,g_div,g_cwmr,g_q,g_oz,g_tv
-  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_cf
 
 
 ! !DESCRIPTION: Transfer contents of 2-d array global to 3-d subdomain array
@@ -169,13 +168,230 @@ subroutine general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr,
                g_cwmr(i,j,klev)=sub(ij,k)
             enddo
          enddo
-      elseif ( iflag(k) == 11 .and. present(g_cf) ) then  
+      endif
+   enddo ! do k=1,icount
+
+   icount=0
+   ilev=0
+   iflag=0
+
+   return
+
+end subroutine general_reload
+
+subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+           g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vdflag, &
+           g_cf,g_cnvw,g_cnvc)
+! !USES:
+  use kinds, only: r_kind,i_kind
+  use mpimod, only: npe,mpi_comm_world,ierror,mpi_rtype
+  use general_sub2grid_mod, only: sub2grid_info
+
+  implicit none
+! !INPUT PARAMETERS:
+
+  type(sub2grid_info),                intent(in   ) :: grd
+  integer(i_kind),                    intent(inout) :: icount
+  integer(i_kind),dimension(npe),     intent(inout) :: ilev,iflag
+  real(r_kind),dimension(grd%itotsub),intent(in   ) :: work
+  logical,                            intent(in   ) :: uvflag,vdflag
+
+! !OUTPUT PARAMETERS:
+
+  real(r_kind),dimension(grd%lat2,grd%lon2),         intent(  out) :: g_ps
+  real(r_kind),dimension(grd%lat2,grd%lon2),         intent(inout) :: g_z
+  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out) :: g_u,g_v,&
+       g_vor,g_div,g_q,g_oz,g_tv,g_ql,g_qi,g_qr,g_qs,g_qg
+  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_cf
+  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_cnvw
+  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_cnvc
+
+  integer(i_kind) i,j,k,ij,klev
+  real(r_kind),dimension(grd%lat2*grd%lon2,npe):: sub
+
+  call mpi_alltoallv(work,grd%sendcounts_s,grd%sdispls_s,mpi_rtype,&
+       sub,grd%recvcounts_s,grd%rdispls_s,mpi_rtype,&
+       mpi_comm_world,ierror)
+
+!$omp parallel do  schedule(dynamic,1) private(k,i,j,ij,klev)
+   do k=1,icount
+      if ( iflag(k) == 1 ) then
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_z(i,j)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 2 ) then
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_ps(i,j)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 3 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_tv(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 4 ) then
+         klev=ilev(k)
+         if ( vdflag ) then
+           ij=0
+           do j=1,grd%lon2
+              do i=1,grd%lat2
+                 ij=ij+1
+                 g_vor(i,j,klev)=sub(ij,k)
+              enddo
+           enddo
+         endif
+         if ( .not. uvflag ) then
+           ij=0
+           do j=1,grd%lon2
+              do i=1,grd%lat2
+                 ij=ij+1
+                 g_u(i,j,klev)=sub(ij,k)
+              enddo
+           enddo
+         endif
+      elseif ( iflag(k) == 5 ) then
+         klev=ilev(k)
+         if ( vdflag ) then
+           ij=0
+           do j=1,grd%lon2
+              do i=1,grd%lat2
+                 ij=ij+1
+                 g_div(i,j,klev)=sub(ij,k)
+              enddo
+           enddo
+         endif
+         if ( .not. uvflag ) then
+           ij=0
+           do j=1,grd%lon2
+              do i=1,grd%lat2
+                 ij=ij+1
+                 g_v(i,j,klev)=sub(ij,k)
+              enddo
+           enddo
+         endif
+      elseif ( iflag(k) == 6 ) then
+         if ( .not. uvflag) then
+           write(6,*) 'error in general_reload  u '
+         endif
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_u(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 7 ) then
+         if ( .not. uvflag) then
+           write(6,*) 'error in general_reload  v '
+         endif
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_v(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 8 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_q(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 9 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_oz(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 10 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_ql(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 11 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_qi(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 12 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_qr(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 13 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_qs(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 14 ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_qg(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 15 .and. present(g_cf) ) then
          klev=ilev(k)
          ij=0
          do j=1,grd%lon2
             do i=1,grd%lat2
                ij=ij+1
                g_cf(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 16 .and. present(g_cnvw) ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_cnvw(i,j,klev)=sub(ij,k)
+            enddo
+         enddo
+      elseif ( iflag(k) == 17 .and. present(g_cnvc) ) then
+         klev=ilev(k)
+         ij=0
+         do j=1,grd%lon2
+            do i=1,grd%lat2
+               ij=ij+1
+               g_cnvc(i,j,klev)=sub(ij,k)
             enddo
          enddo
       endif
@@ -187,7 +403,7 @@ subroutine general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr,
 
    return
 
-end subroutine general_reload
+end subroutine general_reload2
 
 end module gfsreadmod
 
@@ -821,8 +1037,10 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    use gsi_bundlemod, only: gsi_bundle
    use gsi_bundlemod, only: gsi_bundlegetpointer
    use jfunc, only: cnvw_option
-   use gfsreadmod, only: general_reload
+   use gfsreadmod, only: general_reload,general_reload2
    use guess_grids, only: ifilesfc
+   use gsi_metguess_mod,  only: gsi_metguess_get
+   use control_vectors, only: lcalc_gfdl_cfrac
 
    implicit none
 
@@ -843,7 +1061,8 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    real(r_kind),pointer,dimension(:,:)       :: g_ps
    real(r_kind),pointer,dimension(:,:,:)     :: g_vor,g_div,&
                                                 g_cwmr,g_q,g_oz,g_tv,g_cf
-
+   real(r_kind),pointer,dimension(:,:,:)     :: g_ql,g_qi,g_qr,g_qs,g_qg
+   real(r_kind),pointer,dimension(:,:,:)     :: g_cnvw,g_cnvc
    real(r_kind),allocatable,dimension(:,:)   :: g_z
    real(r_kind),allocatable,dimension(:,:,:) :: g_u,g_v
 
@@ -873,12 +1092,14 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    real(r_kind),allocatable,dimension(:) :: rlats,rlons,clons,slons
    real(4),allocatable,dimension(:) :: r4lats,r4lons
 
-   logical :: procuse,diff_res,eqspace,has_cf
+   logical :: procuse,diff_res,eqspace,has_cf,read_cf
    character(nemsio_charkind),allocatable:: recname(:)
    type(nemsio_gfile) :: gfile
    type(nemsio_gfile) :: gfilesfc
    type(egrid2agrid_parm) :: p_high
    logical,dimension(1) :: vector
+   integer(i_kind) :: icw,iql,iqi,iqr,iqs,iqg,icf,icnvw,icnvc
+   logical :: individual_hydro
 
    !******************************************************************************
    ! Initialize variables used below
@@ -887,6 +1108,21 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    nlatm2=grd%nlat-2
    iflag = 0
    ilev = 0
+
+   call gsi_metguess_get ('var::cw', icw, istatus )
+   call gsi_metguess_get ('var::ql', iql, istatus )
+   call gsi_metguess_get ('var::qi', iqi, istatus )
+   call gsi_metguess_get ('var::qr', iqr, istatus )
+   call gsi_metguess_get ('var::qs', iqs, istatus )
+   call gsi_metguess_get ('var::qg', iqg, istatus )
+   call gsi_metguess_get ('var::cf', icf, istatus )
+   call gsi_metguess_get ('var::cnvw', icnvw, istatus )
+   call gsi_metguess_get ('var::cnvc', icnvc, istatus )              
+
+   individual_hydro = (iql > 0 .or. iqi > 0 .or. iqr > 0 .or. iqs > 0 .or. iqg > 0)
+   individual_hydro = (icw <= 0 .and. individual_hydro) 
+
+   if (mype == 0) print *,'icw, iql, iqi', icw, iql, iqi
 
    nlevs=grd%nsig
    mype_use=-1
@@ -931,7 +1167,8 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
       do jrec=1,nrec
         if (recname(jrec)=='cld_amt') has_cf=.true. 
       enddo
-      if (mype==0) write(6,*) trim(my_name), ' has_cf = ', has_cf 
+      read_cf = (icf > 0 .and. .not. lcalc_gfdl_cfrac .and. has_cf .and. individual_hydro)
+      if (mype==0) write(6,*) trim(my_name), ' has_cf = ', has_cf, 'read_cf = ', read_cf
 
       fhour = float(nfhour) + float(nfminute)/r60 + float(nfsecondn)/float(nfsecondd)/r3600
       odate(1) = idate(4)  !hour
@@ -1061,9 +1298,19 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    call gsi_bundlegetpointer(gfs_bundle,'ps',g_ps  ,ier);istatus=istatus+ier
    call gsi_bundlegetpointer(gfs_bundle,'q' ,g_q   ,ier);istatus=istatus+ier
    call gsi_bundlegetpointer(gfs_bundle,'oz',g_oz  ,ier);istatus=istatus+ier
-   call gsi_bundlegetpointer(gfs_bundle,'cw',g_cwmr,ier);istatus=istatus+ier
-   if(has_cf) call gsi_bundlegetpointer(gfs_bundle,'cf',g_cf,  ier);istatus=istatus+ier
-
+   if (icw > 0) call gsi_bundlegetpointer(gfs_bundle,'cw',g_cwmr,ier);istatus=istatus+ier
+   if(individual_hydro) then
+      call gsi_bundlegetpointer(gfs_bundle,'ql',g_ql  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qi',g_qi  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qr',g_qr  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qs',g_qs  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qg',g_qg  ,ier);istatus=istatus+ier
+   end if
+   if (cnvw_option .and. icnvw > 0) then
+      call gsi_bundlegetpointer(gfs_bundle,'cnvw',g_qg ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'cnvc',g_qg ,ier);istatus=istatus+ier 
+   end if
+   if(read_cf) call gsi_bundlegetpointer(gfs_bundle,'cf',g_cf, ier);istatus=istatus+ier
    if ( istatus /= 0 ) then
       if ( mype == 0 ) then
          write(6,*) 'general_read_gfsatm_nems: ERROR'
@@ -1110,13 +1357,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         if (has_cf) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
-         else
+         if (.not. individual_hydro) then
             call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
                  icount,iflag,ilev,work,uvflag,vordivflag) 
-         endif
+         else
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
       endif
    endif
 
@@ -1146,13 +1393,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
       endif
    endif
    if ( icount == icm ) then
-      if (has_cf) then
+      if (.not. individual_hydro) then
          call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+              icount,iflag,ilev,work,uvflag,vordivflag)
       else
-         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag) 
-      endif
+         call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+              g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+      end if
    endif
 
    !   Thermodynamic variable:  s-->g transform, communicate to all tasks
@@ -1190,13 +1437,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         if (has_cf) then
+         if (.not. individual_hydro) then
             call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+                 icount,iflag,ilev,work,uvflag,vordivflag)
          else
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag) 
-         endif
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
       endif
 
       if ( vordivflag .or. .not. uvflag ) then
@@ -1252,13 +1499,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             deallocate(grid_vor)
          endif
          if ( icount == icm ) then
-            if (has_cf) then
+            if (.not. individual_hydro) then
                call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+                    icount,iflag,ilev,work,uvflag,vordivflag)
             else
-               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag) 
-            endif
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            end if
          endif
 
          icount=icount+1
@@ -1312,13 +1559,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             deallocate(grid_div)
          endif
          if ( icount == icm ) then
-            if (has_cf) then
+            if (.not. individual_hydro) then
                call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+                    icount,iflag,ilev,work,uvflag,vordivflag)
             else
-               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag) 
-            endif
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            end if
          endif
 
       endif ! if ( vordivflag .or. .not. uvflag )
@@ -1354,13 +1601,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             endif
          endif
          if ( icount == icm ) then
-            if (has_cf) then
+            if (.not. individual_hydro) then
                call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+                    icount,iflag,ilev,work,uvflag,vordivflag)
             else
-               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag) 
-            endif
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            end if
          endif
 
          icount=icount+1
@@ -1392,13 +1639,13 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             endif
          endif
          if ( icount == icm ) then
-            if (has_cf) then
+            if (.not. individual_hydro) then
                call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
+                    icount,iflag,ilev,work,uvflag,vordivflag)
             else
-               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag) 
-            endif
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            end if
          endif
 
       endif ! if ( uvflag )
@@ -1427,14 +1674,327 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         if (has_cf) then
+         if (.not. individual_hydro) then
             call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag,g_cf)  
+                 icount,iflag,ilev,work,uvflag,vordivflag)
          else
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)  
-         endif
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
       endif
+
+      if (icw > 0) then
+         icount=icount+1
+         iflag(icount)=10
+         ilev(icount)=k
+   
+         if (mype==mype_use(icount)) then
+            ! Cloud condensate mixing ratio.
+            work=zero
+            call nemsio_readrecv(gfile,'clwmr','mid layer',k,rwork1d0,iret=iret)
+            if (iret /= 0) call error_msg(trim(my_name),trim(filename),'clwmr','read',istop+9,iret)
+            if (mype == 0 .and. it == 4) print *,'rwork1d0', maxval(rwork1d0), minval(rwork1d0)
+            if (imp_physics == 11) then
+               call nemsio_readrecv(gfile,'icmr','mid layer',k,rwork1d1,iret=iret)
+               if (iret /= 0) then
+                  call error_msg(trim(my_name),trim(filename),'icmr','read',istop+10,iret)
+               else
+                  rwork1d0 = rwork1d0 + rwork1d1
+               endif
+            endif
+            if (mype == 0 .and. it == 4) print *,'rwork1d0_ice', maxval(rwork1d0), minval(rwork1d0)
+            if (cnvw_option) then
+               call nemsio_readrecv(gfilesfc,'cnvw','mid layer',k,rwork1d1,iret=iret)
+               if (iret /= 0) then
+                  call error_msg(trim(my_name),trim(filenamesfc),'cnvw','read',istop+11,iret)
+               else
+                  rwork1d0 = rwork1d0 + rwork1d1
+               endif
+            endif
+            if ( diff_res ) then
+               grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+               vector(1)=.false.
+               call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+               call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+               do kk=1,grd%itotsub
+                  i=grd%ltosi_s(kk)
+                  j=grd%ltosj_s(kk)
+                  work(kk)=grid2(i,j,1)
+               enddo
+            else
+               grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+               call general_fill_ns(grd,grid,work)
+            endif
+         endif
+         if ( icount == icm ) then
+            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                 icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
+      else
+
+         if (iql > 0) then
+            icount=icount+1
+            iflag(icount)=10
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! Cloud liquid water mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'clwmr','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'clwmr','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+   
+            endif
+   
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
+
+         if (iqi > 0) then
+            icount=icount+1
+            iflag(icount)=11
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! cloud ice mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'icmr','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'icmr','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
+
+         if (iqr > 0) then
+            icount=icount+1
+            iflag(icount)=12
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! rain mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'rwmr','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'rwmr','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
+
+         if (iqs > 0) then
+            icount=icount+1
+            iflag(icount)=13
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! Cloud liquid water mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'snmr','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'snmr','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
+
+         if (iqg > 0) then
+            icount=icount+1
+            iflag(icount)=14
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! graupel mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'grle','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'grle','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
+
+         if (read_cf) then
+            icount=icount+1
+            iflag(icount)=15
+            ilev(icount)=k
+   
+            if (mype==mype_use(icount)) then
+               ! cloud amount
+               call nemsio_readrecv(gfile,'cld_amt','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'cld_amt','read',istop+11,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf)
+            endif
+         endif
+
+         if (icnvw > 0) then
+            icount=icount+1
+            iflag(icount)=16
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! convective cloud liquid water mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'cnvw','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'cnvw','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            endif
+         endif
+
+         if (icnvc > 0) then
+            icount=icount+1
+            iflag(icount)=17
+            ilev(icount)=k
+
+            if (mype==mype_use(icount)) then
+               ! convective cloud liquid water mixing ratio.
+               work=zero
+               call nemsio_readrecv(gfile,'cnvc','mid layer',k,rwork1d0,iret=iret)
+               if (iret /= 0) call error_msg(trim(my_name),trim(filename),'cnvc','read',istop+10,iret)
+               if ( diff_res ) then
+                  grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
+                  call general_fill_ns(grd,grid,work)
+               endif
+
+            endif
+            if ( icount == icm ) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            endif
+         endif
+
+      end if
 
       icount=icount+1
       iflag(icount)=9
@@ -1459,97 +2019,16 @@ subroutine general_read_gfsatm_nems(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             call general_fill_ns(grd,grid,work)
          endif
       endif
-      if ( icount == icm ) then
-         if (has_cf) then
+      if ( icount == icm  .or. k==nlevs ) then
+         if (.not. individual_hydro) then
             call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag,g_cf)  
+                 icount,iflag,ilev,work,uvflag,vordivflag)
          else
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)  
-         endif
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
       endif
-
-      icount=icount+1
-      iflag(icount)=10
-      ilev(icount)=k
-
-      if (mype==mype_use(icount)) then
-         ! Cloud condensate mixing ratio.
-         work=zero
-         call nemsio_readrecv(gfile,'clwmr','mid layer',k,rwork1d0,iret=iret)
-         if (iret /= 0) call error_msg(trim(my_name),trim(filename),'clwmr','read',istop+9,iret)
-         if (imp_physics == 11) then
-            call nemsio_readrecv(gfile,'icmr','mid layer',k,rwork1d1,iret=iret)
-            if (iret /= 0) then
-               call error_msg(trim(my_name),trim(filename),'icmr','read',istop+10,iret)
-            else
-               rwork1d0 = rwork1d0 + rwork1d1
-            endif
-         endif
-         if (cnvw_option) then
-            call nemsio_readrecv(gfilesfc,'cnvcldwat','mid layer',k,rwork1d1,iret=iret)
-            if (iret /= 0) then
-               call error_msg(trim(my_name),trim(filenamesfc),'cnvcldwat','read',istop+11,iret)
-            else
-               rwork1d0 = rwork1d0 + rwork1d1
-            endif
-         endif
-         if ( diff_res ) then
-            grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
-            vector(1)=.false.
-            call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
-            call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
-            do kk=1,grd%itotsub
-               i=grd%ltosi_s(kk)
-               j=grd%ltosj_s(kk)
-               work(kk)=grid2(i,j,1)
-            enddo
-         else
-            grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
-            call general_fill_ns(grd,grid,work)
-         endif
-      endif
-    ! if ( icount == icm .or. k == nlevs ) then 
-      if ( icount == icm  .or. ( (.not. has_cf) .and. k==nlevs) ) then  
-         if (has_cf) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag,g_cf)  
-         else
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag) 
-         endif
-      endif
-
-      if (has_cf) then
-         icount=icount+1
-         iflag(icount)=11
-         ilev(icount)=k
-
-         if (mype==mype_use(icount)) then
-            ! cloud amount 
-            call nemsio_readrecv(gfile,'cld_amt','mid layer',k,rwork1d0,iret=iret)
-            if (iret /= 0) call error_msg(trim(my_name),trim(filename),'cld_amt','read',istop+11,iret)
-            if ( diff_res ) then
-               grid_b=reshape(rwork1d0,(/size(grid_b,1),size(grid_b,2)/))
-               vector(1)=.false.
-               call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
-               call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
-               do kk=1,grd%itotsub
-                  i=grd%ltosi_s(kk)
-                  j=grd%ltosj_s(kk)
-                  work(kk)=grid2(i,j,1)
-               enddo
-            else
-               grid=reshape(rwork1d0,(/size(grid,1),size(grid,2)/))
-               call general_fill_ns(grd,grid,work)
-            endif
-         endif
-         if ( icount == icm .or. k==nlevs ) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                    icount,iflag,ilev,work,uvflag,vordivflag,g_cf) 
-         endif
-      endif
-
+   
    enddo ! do k=1,nlevs
 
    if ( procuse ) then
@@ -1669,8 +2148,11 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    use gsi_bundlemod, only: gsi_bundle
    use gsi_bundlemod, only: gsi_bundlegetpointer
    use module_fv3gfs_ncio, only: Dataset, Variable, Dimension, open_dataset,&
-                           close_dataset, get_dim, read_vardata,get_idate_from_time_units
-   use gfsreadmod, only: general_reload
+                           close_dataset, get_dim, read_vardata,get_idate_from_time_units,has_var
+   use gfsreadmod, only: general_reload,general_reload2
+   use jfunc, only: cnvw_option
+   use gsi_metguess_mod,  only: gsi_metguess_get
+   use control_vectors, only: lcalc_gfdl_cfrac
 
    implicit none
 
@@ -1690,7 +2172,8 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    real(r_kind),pointer,dimension(:,:)       :: g_ps
    real(r_kind),pointer,dimension(:,:,:)     :: g_vor,g_div,&
                                                 g_cwmr,g_q,g_oz,g_tv
-
+   real(r_kind),pointer,dimension(:,:,:)     :: g_ql,g_qi,g_qr,g_qs,g_qg,g_cf
+   real(r_kind),pointer,dimension(:,:,:)     :: g_cnvw,g_cnvc
    real(r_kind),allocatable,dimension(:,:)   :: g_z
    real(r_kind),allocatable,dimension(:,:,:) :: g_u,g_v
 
@@ -1717,13 +2200,13 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    real(r_kind),allocatable,dimension(:) :: rlats,rlons,clons,slons
    real(r_kind),allocatable,dimension(:) :: rlats_tmp,rlons_tmp
 
-   logical :: procuse,diff_res,eqspace
+   logical :: procuse,diff_res,eqspace,has_cf,read_cf
    type(egrid2agrid_parm) :: p_high
    logical,dimension(1) :: vector
    type(Dataset) :: atmges
    type(Dimension) :: ncdim
-
-
+   integer(i_kind) :: icw, iql,iqi,iqr,iqs,iqg,icf,icnvw,icnvc
+   logical :: individual_hydro
 
    !******************************************************************************
    ! Initialize variables used below
@@ -1732,6 +2215,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    nlatm2=grd%nlat-2
    iflag = 0
    ilev = 0
+
+   call gsi_metguess_get ('var::cw', icw, istatus )
+   call gsi_metguess_get ('var::ql', iql, istatus )
+   call gsi_metguess_get ('var::qi', iqi, istatus )
+   call gsi_metguess_get ('var::qr', iqr, istatus )
+   call gsi_metguess_get ('var::qs', iqs, istatus )
+   call gsi_metguess_get ('var::qg', iqg, istatus )
+   call gsi_metguess_get ('var::cf', icf, istatus )
+   call gsi_metguess_get ('var::cnvw', icnvw, istatus )
+   call gsi_metguess_get ('var::cnvc', icnvc, istatus )
+
+   if (mype==0) write(6,*) trim(my_name), ' icw, iql, iqi, iqr, iqs, iqg = ', &
+                           icw, iql, iqi, iqr, iqs, iqg
+   if (mype==0) write(6,*) trim(my_name), ' icnvw, icnvw =', icnvw, icnvw
+
+   individual_hydro = (iql > 0 .or. iqi > 0 .or. iqr > 0 .or. iqs > 0 .or. iqg > 0)
+   individual_hydro = (icw <= 0 .and. individual_hydro)
 
    nlevs=grd%nsig
    mype_use=-1
@@ -1792,6 +2292,15 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
       odate(2) = idate(2)  !month
       odate(3) = idate(3)  !day
       odate(4) = idate(1)  !year
+  
+      if (has_var(atmges,'cld_amt')) then
+         has_cf = .true.
+      else
+         has_cf = .false.
+      end if
+      read_cf = (icf > 0 .and. .not. lcalc_gfdl_cfrac .and. has_cf .and. individual_hydro)
+      if (mype==0) write(6,*) trim(my_name), ' individual_hydro = ', individual_hydro 
+      if (mype==0) write(6,*) trim(my_name), ' has_cf = ', has_cf, 'read_cf = ', read_cf
 
       diff_res=.false.
       if ( latb /= nlatm2 ) then
@@ -1894,7 +2403,19 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
    call gsi_bundlegetpointer(gfs_bundle,'ps',g_ps  ,ier);istatus=istatus+ier
    call gsi_bundlegetpointer(gfs_bundle,'q' ,g_q   ,ier);istatus=istatus+ier
    call gsi_bundlegetpointer(gfs_bundle,'oz',g_oz  ,ier);istatus=istatus+ier
-   call gsi_bundlegetpointer(gfs_bundle,'cw',g_cwmr,ier);istatus=istatus+ier
+   if(icw > 0)  call gsi_bundlegetpointer(gfs_bundle,'cw',g_cwmr,ier);istatus=istatus+ier
+   if(individual_hydro) then
+      call gsi_bundlegetpointer(gfs_bundle,'ql',g_ql  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qi',g_qi  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qr',g_qr  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qs',g_qs  ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'qg',g_qg  ,ier);istatus=istatus+ier
+   end if
+   if(read_cf) call gsi_bundlegetpointer(gfs_bundle,'cf',g_cf, ier);istatus=istatus+ier
+   if (cnvw_option .and. icnvw > 0) then
+      call gsi_bundlegetpointer(gfs_bundle,'cnvw',g_cnvw ,ier);istatus=istatus+ier
+      call gsi_bundlegetpointer(gfs_bundle,'cnvc',g_cnvc ,ier);istatus=istatus+ier
+   end if
    if ( istatus /= 0 ) then
       if ( mype == 0 ) then
          write(6,*) 'general_read_gfsatm_nems: ERROR'
@@ -1940,8 +2461,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag)
+         if (.not. individual_hydro) then
+            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                 icount,iflag,ilev,work,uvflag,vordivflag)
+         else
+            if (icnvw > 0) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            else if (read_cf) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf)
+            else
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            end if
+         end if
       endif
    endif
 
@@ -1970,8 +2506,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
       endif
    endif
    if ( icount == icm ) then
-      call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-           icount,iflag,ilev,work,uvflag,vordivflag)
+      if (.not. individual_hydro) then
+         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+              icount,iflag,ilev,work,uvflag,vordivflag)
+      else
+         if (icnvw > 0) then
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                 vordivflag,g_cf,g_cnvw,g_cnvc)
+         else if (read_cf) then
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                 vordivflag,g_cf)
+         else
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                 g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         end if
+      end if
    endif
 
    !   Thermodynamic variable:  s-->g transform, communicate to all tasks
@@ -2007,9 +2558,24 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag)
-      endif
+         if (.not. individual_hydro) then
+            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                 icount,iflag,ilev,work,uvflag,vordivflag)
+         else
+            if (icnvw > 0) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            else if (read_cf) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf)
+            else
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         end if
+      end if
    end do
 
    if ( vordivflag .or. .not. uvflag ) then
@@ -2064,8 +2630,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             deallocate(grid_vor)
          endif
          if ( icount == icm ) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)
+            if (.not. individual_hydro) then
+               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                    icount,iflag,ilev,work,uvflag,vordivflag)
+            else
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
          endif
 
       end do
@@ -2121,8 +2702,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             deallocate(grid_div)
          endif
          if ( icount == icm ) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)
+            if (.not. individual_hydro) then
+               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                    icount,iflag,ilev,work,uvflag,vordivflag)
+            else
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
          endif
 
       end do
@@ -2156,8 +2752,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             endif
          endif
          if ( icount == icm ) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)
+            if (.not. individual_hydro) then
+               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                    icount,iflag,ilev,work,uvflag,vordivflag)
+            else
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
          endif
 
          icount=icount+1
@@ -2187,8 +2798,23 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             endif
          endif
          if ( icount == icm ) then
-            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-                 icount,iflag,ilev,work,uvflag,vordivflag)
+            if (.not. individual_hydro) then
+               call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                    icount,iflag,ilev,work,uvflag,vordivflag)
+            else
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
          endif
       end do
    endif ! if ( uvflag )
@@ -2217,13 +2843,382 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
          endif
       endif
       if ( icount == icm ) then
-         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag)
+         if (.not. individual_hydro) then
+            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                 icount,iflag,ilev,work,uvflag,vordivflag)
+         else
+            if (icnvw > 0) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            else if (read_cf) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf)
+            else
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
+         endif
       endif
    end do
+
+   if (icw > 0) then 
+      do k=1,nlevs
+         icount=icount+1
+         iflag(icount)=10
+         ilev(icount)=k
+         kr = levs+1-k ! netcdf is top to bottom, need to flip
+   
+         if (mype==mype_use(icount)) then
+            call read_vardata(atmges, 'clwmr', rwork3d0, nslice=kr, slicedim=3)
+            call read_vardata(atmges, 'icmr', rwork3d1, nslice=kr, slicedim=3)
+            ! Cloud condensate mixing ratio.
+            rwork2d = rwork3d0(:,:,1)+rwork3d1(:,:,1)
+            if (cnvw_option) then
+               call read_vardata(atmges, 'cnvw', rwork3d1, nslice=kr, slicedim=3)
+               rwork2d = rwork2d + rwork3d1(:,:,1)
+            endif
+            if ( diff_res ) then
+               grid_b=rwork2d
+               vector(1)=.false.
+               call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+               call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+               do kk=1,grd%itotsub
+                  i=grd%ltosi_s(kk)
+                  j=grd%ltosj_s(kk)
+                  work(kk)=grid2(i,j,1)
+               enddo
+            else
+               grid=rwork2d
+               call general_fill_ns(grd,grid,work)
+            endif
+         endif
+         if ( icount == icm ) then
+            call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
+                 icount,iflag,ilev,work,uvflag,vordivflag)
+         endif
+      enddo ! do k=1,nlevs
+   else
+      if (iql > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=10
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'clwmr', rwork3d0, nslice=kr, slicedim=3)
+               ! cloud water mixing ratio
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
+         end do
+      endif
+
+      if (iqi > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=11
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'icmr', rwork3d0, nslice=kr, slicedim=3)
+               ! cloud ice mixing ratio
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
+         end do
+      endif
+
+      if (iqr > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=12
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'rwmr', rwork3d0, nslice=kr, slicedim=3)
+               ! rain water mixing ratio
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
+         end do
+      endif
+
+      if (iqs > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=13
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'snmr', rwork3d0, nslice=kr, slicedim=3)
+               ! snow mixing ratio
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
+         end do
+      endif
+
+      if (iqg > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=14
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'grle', rwork3d0, nslice=kr, slicedim=3)
+               ! graupel mixing ratio
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf,g_cnvw,g_cnvc)
+               else if (read_cf) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               else
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+               endif
+            endif
+         end do
+      endif
+
+      if (read_cf) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=15
+            ilev(icount)=k
+            kr = levs+1-k
+   
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'cld_amt', rwork3d0, nslice=kr, slicedim=3)
+               ! cloud fraction
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+               if (icnvw > 0) then
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                              g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                              vordivflag,g_cf,g_cnvw,g_cnvc)
+               else  
+                  call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                       g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                       vordivflag,g_cf)
+               endif
+            endif
+         end do
+      end if
+
+      if (icnvw > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=16
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'cnvw', rwork3d0, nslice=kr, slicedim=3)
+               ! convective cloud water
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+              call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            endif
+         end do
+      endif
+
+      if (icnvc > 0) then
+         do k=1,nlevs
+            icount=icount+1
+            iflag(icount)=16
+            ilev(icount)=k
+            kr = levs+1-k
+
+            if (mype==mype_use(icount)) then
+               call read_vardata(atmges, 'cnvc', rwork3d0, nslice=kr, slicedim=3)
+               ! convective cloud cloud fraction
+               if ( diff_res ) then
+                  grid_b=rwork3d0(:,:,1)
+                  vector(1)=.false.
+                  call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
+                  call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
+                  do kk=1,grd%itotsub
+                     i=grd%ltosi_s(kk)
+                     j=grd%ltosj_s(kk)
+                     work(kk)=grid2(i,j,1)
+                  enddo
+               else
+                  grid=rwork3d0(:,:,1)
+                  call general_fill_ns(grd,grid,work)
+               endif
+            endif
+            if ( icount == icm ) then
+              call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            endif
+         end do
+      endif
+   end if
+
    do k=1,nlevs
       kr = levs+1-k ! netcdf is top to bottom, need to flip
-   
+
       icount=icount+1
       iflag(icount)=9
       ilev(icount)=k
@@ -2246,46 +3241,26 @@ subroutine general_read_gfsatm_nc(grd,sp_a,filename,uvflag,vordivflag,zflag, &
             call general_fill_ns(grd,grid,work)
          endif
       endif
-      if ( icount == icm ) then
-         call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
-              icount,iflag,ilev,work,uvflag,vordivflag)
-      endif
-   end do
-
-   do k=1,nlevs
-      icount=icount+1
-      iflag(icount)=10
-      ilev(icount)=k
-      kr = levs+1-k ! netcdf is top to bottom, need to flip
-
-      if (mype==mype_use(icount)) then
-         call read_vardata(atmges, 'clwmr', rwork3d0, nslice=kr, slicedim=3)
-         call read_vardata(atmges, 'icmr', rwork3d1, nslice=kr, slicedim=3)
-         ! Cloud condensate mixing ratio.
-         rwork2d = rwork3d0(:,:,1)+rwork3d1(:,:,1)
-         if ( diff_res ) then
-            grid_b=rwork2d
-            vector(1)=.false.
-            call fill2_ns(grid_b,grid_c(:,:,1),latb+2,lonb)
-            call g_egrid2agrid(p_high,grid_c,grid2,1,1,vector)
-            do kk=1,grd%itotsub
-               i=grd%ltosi_s(kk)
-               j=grd%ltosj_s(kk)
-               work(kk)=grid2(i,j,1)
-            enddo
-         else
-            grid=rwork2d
-            call general_fill_ns(grd,grid,work)
-         endif
-
-      endif
-
-         if ( icount == icm .or. k == nlevs ) then
+      if ( icount == icm .or. k == nlevs ) then
+         if (.not. individual_hydro) then
             call general_reload(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz,g_cwmr, &
                  icount,iflag,ilev,work,uvflag,vordivflag)
+         else
+            if (icnvw > 0) then
+              call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf,g_cnvw,g_cnvc)
+            else if (read_cf) then
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag, &
+                    vordivflag,g_cf)
+            else
+               call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                    g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+            endif
          endif
-
-   enddo ! do k=1,nlevs
+      endif
+   end do
 
    if ( procuse ) then
       if ( diff_res) deallocate(grid_b,grid_b2,grid_c,grid_c2,grid2)
