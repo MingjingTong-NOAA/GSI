@@ -2184,7 +2184,7 @@ contains
   deallocate(diagbufchan)
   deallocate(sc_index)
 
-  if (rad_diagsave) then
+  if (rad_diagsave .and. nchanl_diag > 0) then
      if (netcdf_diag) call nc_diag_write
      if (binary_diag) call final_binary_diag_
      if (allsky_verbose) call final_binary_jac_

@@ -96,7 +96,7 @@
      factql,factqi,factqr,factqs,factqg, &  
      factv,factl,factp,factg,factw10m,facthowv,factcldch,niter,niter_no_qc,biascor,&
      init_jfunc,qoption,cwoption,switch_on_derivatives,tendsflag,jiterstart,jiterend,R_option,&
-     bcoption,diurnalbc,print_diag_pcg,tsensible,lgschmidt,diag_precon,step_start,pseudo_q2,&
+     bcoption,diurnalbc,print_diag_pcg,tsensible,diag_precon,step_start,pseudo_q2,&
      clip_supersaturation,cnvw_option,clip_hydrometeor
   use state_vectors, only: init_anasv,final_anasv
   use control_vectors, only: init_anacv,final_anacv,nrf,nvars,nrf_3d,cvars3d,cvars2d,&
@@ -123,8 +123,9 @@
      nlayers,use_gfs_ozone,check_gfs_ozone_date,regional_ozone,jcap,jcap_b,vlevs,&
      use_gfs_nemsio,sfcnst_comb,use_readin_anl_sfcmask,use_sp_eqspace,final_grid_vars,&
      jcap_gfs,nlat_gfs,nlon_gfs,jcap_cut,wrf_mass_hybridcord,use_gfs_ncio,write_fv3_incr,&
-     use_fv3_aero,dlnpm_ratio
-  use guess_grids, only: ifact10,sfcmod_gfs,sfcmod_mm5,use_compress,nsig_ext,gpstop
+     use_fv3_aero,grid_type_fv3_regional
+  use gridmod,only: l_reg_update_hydro_delz
+  use guess_grids, only: ifact10,sfcmod_gfs,sfcmod_mm5,use_compress,nsig_ext,gpstop,commgpstop,commgpserrinf
   use gsi_io, only: init_io,lendian_in,verbose,print_obs_para
   use regional_io_mod, only: regional_io_class
   use wrf_params_mod, only: update_pint, preserve_restart_date
@@ -443,6 +444,7 @@
 !                          observation error (DOE) specification to
 !                          GSI namelist level (beneath obsmod.F90).
 !  09-15-2020 Wu        Add option tcp_posmatch to mitigate possibility of erroneous TC initialization
+!  2021-01-05  x.zhang/lei  - add code for updating delz analysis in regional da
 !
 !EOP
 !-------------------------------------------------------------------------
@@ -566,8 +568,6 @@
 !     preserve_restart_date - if true, then do not update regional restart file date.
 !     tsensible - option to use sensible temperature as the analysis variable. works
 !                 only for twodvar_regional=.true.
-!     lgschmidt - option for re-biorthogonalization of the {gradx} and {grady} sets
-!                 from pcgsoi when twodvar_regional=.true.
 !     hilbert_curve - option for hilbert-curve based cross-validation. works only
 !                     with twodvar_regional=.true.
 !     neutral_stability_windfact_2dvar - option to use simple, similarity
@@ -594,6 +594,8 @@
 !     use_compress - option to turn on the use of compressibility factors in geopotential heights
 !     nsig_ext - number of layers above the model top which are necessary to compute the bending angle for gpsro
 !     gpstop - maximum height for gpsro data assimilation. Reject anything above this height. 
+!     commgpstop -Reject commercial ro above this height. Logic in setupbend assumes commgpstop <= gpstop.
+!     commgpserrinf - optional error inflation factor for commercial gpsro data
 !     use_gfs_nemsio  - option to use nemsio to read global model NEMS/GFS first guess
 !     use_gfs_ncio - option to use netCDF to read global model FV3-GFS first guess
 !     use_fv3_aero - option to use FV3-Chem vs NGAC for global aerosol analysis
@@ -686,7 +688,7 @@
        diag_rad,diag_pcp,diag_conv,diag_ozone,diag_aero,diag_co,diag_light,diag_radardbz,iguess, &
        write_diag,reduce_diag, &
        oneobtest,sfcmodel,dtbduv_on,ifact10,l_foto,offtime_data,&
-       use_pbl,use_compress,nsig_ext,gpstop,&
+       use_pbl,use_compress,nsig_ext,gpstop,commgpstop, commgpserrinf, &
        perturb_obs,perturb_fact,oberror_tune,preserve_restart_date, &
        crtm_coeffs_path,crtm_overlap,rewopt,reiopt,crtm_gfdl,allsky_verbose, &
        cloud_mask_option,mask_threshold,berror_stats,tcp_posmatch,tcp_box, &
@@ -700,7 +702,7 @@
        nwrvecs,iorthomax,ladtest,ladtest_obs, lgrtest,lobskeep,lsensrecompute,jsiga,ltcost, &
        lobsensfc,lobsensjb,lobsensincr,lobsensadj,lobsensmin,iobsconv, &
        idmodel,iwrtinc,lwrite4danl,nhr_anal,jiterstart,jiterend,lobserver,lanczosave,llancdone, &
-       lferrscale,print_diag_pcg,tsensible,lgschmidt,lread_obs_save,lread_obs_skip, &
+       lferrscale,print_diag_pcg,tsensible,lread_obs_save,lread_obs_skip, &
        use_gfs_ozone,check_gfs_ozone_date,regional_ozone,lwrite_predterms,&
        lwrite_peakwt,use_gfs_nemsio,use_gfs_ncio,sfcnst_comb,liauon,use_prepb_satwnd,l4densvar,ens_nstarthr,&
        use_gfs_stratosphere,pblend0,pblend1,step_start,diag_precon,lrun_subdirs,&
@@ -714,7 +716,8 @@
        minobrangevr, maxtiltdbz, mintiltvr,mintiltdbz,if_vterminal,if_vrobs_raw,&
        if_model_dbz,imp_physics,lupp,netcdf_diag,binary_diag,l_wcp_cwm,aircraft_recon,diag_version,&
        write_fv3_incr,incvars_to_zero,incvars_zero_strat,incvars_efold,diag_version,&
-       cao_check,lcalc_gfdl_cfrac,tau_fcst,efsoi_order,lupdqc,lqcoef,cnvw_option,l2rwthin,hurricane_radar
+       cao_check,lcalc_gfdl_cfrac,tau_fcst,efsoi_order,lupdqc,lqcoef,cnvw_option,l2rwthin,hurricane_radar,&
+       l_reg_update_hydro_delz
 
 ! GRIDOPTS (grid setup variables,including regional specific variables):
 !     jcap     - spectral resolution
@@ -740,6 +743,7 @@
 !     grid_ratio_nmmb   - ratio of analysis grid to nmmb model grid in nmmb model grid units.
 !     grid_ratio_fv3_regional - ratio of analysis grid to fv3 grid in fv3 grid units.
 !     grid_ratio_wrfmass - ratio of analysis grid to wrf mass grid in wrf grid units.
+!     grid_type_fv3_regional - type of fv3 model grid (grid orientation).
 !     twodvar_regional  - logical for regional 2d-var analysis
 !     filled_grid       - logical to fill in puts on WRF-NMM E-grid
 !     half_grid         - logical to use every other row of WRF-NMM E-Grid
@@ -758,7 +762,7 @@
        diagnostic_reg,update_regsfc,netcdf,regional,wrf_nmm_regional,nems_nmmb_regional,fv3_regional,&
        wrf_mass_regional,twodvar_regional,filled_grid,half_grid,nvege_type,nlayers,dlnpm_ratio,cmaq_regional,&
        nmmb_reference_grid,grid_ratio_nmmb,grid_ratio_fv3_regional,grid_ratio_wrfmass,jcap_gfs,jcap_cut,&
-       wrf_mass_hybridcord
+       wrf_mass_hybridcord,grid_type_fv3_regional
 
 ! BKGERR (background error related variables):
 !     vs       - scale factor for vertical correlation lengths for background error
@@ -1459,6 +1463,7 @@
        if(mype == 0) write(6,*) ' ltlint = true, so vqc and njqc must be false'
      end if
   end if
+  if (fv3sar_bg_opt /= 0) l_reg_update_hydro_delz=.false.
   if (anisotropic) then
       call init_fgrid2agrid(pf2aP1)
       call init_fgrid2agrid(pf2aP2)
@@ -1471,12 +1476,6 @@
      if(reduce_diag) &
      call die(myname_,'Options l4dvar and reduce_diag not allowed together',99)
   end if 
-
-! Diagonal preconditioning is necessary for new bias correction
-  if(newpc4pred .and. .not. diag_precon)then
-    diag_precon=.true.
-    step_start=8.e-4_r_kind
-  end if
 
   if( (.not.l4dvar) .and. (.not.l4densvar) ) ljcdfi=.false.
  
