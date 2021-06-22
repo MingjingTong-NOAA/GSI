@@ -326,7 +326,7 @@ subroutine get_gefs_ensperts_dualres
   deallocate(en_read)
   call gsi_enscoupler_destroy_sub2grid_info(grd_tmp)
 
-  call ens_spread_dualres(en_bar(4),4)
+  call ens_spread_dualres(en_bar,4)
 
 ! mm1=mype+1
 !  since initial version is ignoring sst perturbations, skip following code for now.  revisit

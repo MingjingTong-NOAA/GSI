@@ -1418,7 +1418,7 @@ if __name__ == '__main__':
     parser = ArgumentParser(description = 'Process gsistat.gdas.YYYYMMDDHH file',formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument('-x','--expid',help='experiment ID',type=str,nargs='+',required=True)
     parser.add_argument('-b','--begin_date',help='beginning date',type=str,metavar='YYYYMMDDHH',required=True)
-    parser.add_argument('-d','--dump',help='forecast type gfs or gdas',type=str,required=False,default='gdas')
+    parser.add_argument('-d','--dump',help='forecast type gfs or gdas',type=str,nargs='+',required=False,default='gdas')
     parser.add_argument('-e','--end_date',help='ending date',type=str,metavar='YYYYMMDDHH',default=None,required=False)
     parser.add_argument('-a','--archive_dir',help='archive directory',type=str,nargs='+',required=False,default=['/da/noscrub/%s/archive'%os.environ['USER']])
     parser.add_argument('-l','--label',help='list of labels for experiment IDs',nargs='+',required=False)
@@ -1438,7 +1438,7 @@ if __name__ == '__main__':
     expids = args.expid
     bdate = datetime.strptime(args.begin_date,'%Y%m%d%H')
     edate = bdate if args.end_date is None else datetime.strptime(args.end_date,'%Y%m%d%H')
-    cdump = args.dump
+    cdumps = args.dump
     archdirs = args.archive_dir
     save_figure = args.save_figure
     plot_conv = args.plot_conv
@@ -1459,6 +1459,9 @@ if __name__ == '__main__':
     if len(expids) > 1 and len(archdirs) == 1:
         archdirs = archdirs * len(expids)
 
+    if len(expids) > 1 and len(cdumps) == 1:
+        cdumps = cdumps * len(expids) 
+
     # Collect all the objects for all expids and all dates
     gsistat, ps, tcp, sst = {}, {}, {}, {}
     uv, t, q, gps, amv, scrm = {}, {}, {}, {}, {}, {}
@@ -1477,7 +1480,7 @@ if __name__ == '__main__':
     amvtyp = [240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,260]
     scrmtyp = [289, 290]
 
-    for expid,archdir in zip(expids,archdirs):
+    for expid,cdump,archdir in zip(expids,cdumps,archdirs):
 
         print 'reading in data for experiment ... %s' % expid
 

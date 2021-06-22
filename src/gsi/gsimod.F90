@@ -760,7 +760,7 @@
 
   namelist/gridopts/jcap,jcap_b,nsig,nlat,nlon,nlat_regional,nlon_regional,&
        diagnostic_reg,update_regsfc,netcdf,regional,wrf_nmm_regional,nems_nmmb_regional,fv3_regional,&
-       wrf_mass_regional,twodvar_regional,filled_grid,half_grid,nvege_type,nlayers,dlnpm_ratio,cmaq_regional,&
+       wrf_mass_regional,twodvar_regional,filled_grid,half_grid,nvege_type,nlayers,cmaq_regional,&
        nmmb_reference_grid,grid_ratio_nmmb,grid_ratio_fv3_regional,grid_ratio_wrfmass,jcap_gfs,jcap_cut,&
        wrf_mass_hybridcord,grid_type_fv3_regional
 
