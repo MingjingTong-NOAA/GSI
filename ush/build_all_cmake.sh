@@ -93,8 +93,8 @@ else
     source $dir_modules/modulefile.ProdGSI.$target
 fi
 
-export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/REL-2.3.0/crtm_v2.3.0/lib/libcrtm.a
-export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/REL-2.3.0/crtm_v2.3.0/include
+#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0/crtm_v2.3.0/lib/libcrtm.a
+#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0/crtm_v2.3.0/include
 
 if [ $build_type = PRODUCTION -o $build_type = DEBUG ] ; then
   cmake -DBUILD_UTIL=ON -DBUILD_NCDIAG_SERIAL=ON -DCMAKE_BUILD_TYPE=$build_type -DBUILD_CORELIBS=OFF ..
