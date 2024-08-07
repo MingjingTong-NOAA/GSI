@@ -47,10 +47,12 @@ set -x
 
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
-#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0/crtm_v2.4.0/lib/libcrtm.a
-#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0/crtm_v2.4.0/include
-#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/crtm_im/crtm_im/lib64/libcrtm_static.a
-#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/crtm_im/crtm_im/module/crtm/Intel/19.1.2.20200623
+export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a
+export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/include
+#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0_emc/crtm_v2.4.0/lib/libcrtm.a
+#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0_emc/crtm_v2.4.0/include
+#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/build/src/libcrtm.a
+#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/build/module/crtm/Intel/2021.5.0.20211109
 # Collect BUILD Options
 CMAKE_OPTS+=" -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 
