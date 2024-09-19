@@ -47,12 +47,11 @@ set -x
 
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
-export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a
-export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/include
-#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0_emc/crtm_v2.4.0/lib/libcrtm.a
-#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/REL-2.4.0_emc/crtm_v2.4.0/include
-#export CRTM_LIB=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/build/src/libcrtm.a
-#export CRTM_INC=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/build/module/crtm/Intel/2021.5.0.20211109
+CRTMPATH="$DIR_ROOT/../../../../CRTM"
+export CRTM_LIB=${CRTMPATH}/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a
+export CRTM_INC=${CRTMPATH}/REL-2.3.0_emc/crtm_v2.3.0/include
+#export CRTM_LIB=${CRTMPATH}/CRTMv3/build/crtm_v3.1.0/lib64/libcrtm.a
+#export CRTM_INC=${CRTMPATH}/CRTMv3/build/crtm_v3.1.0/module/crtm/Intel/2021.9.0.20230302
 # Collect BUILD Options
 CMAKE_OPTS+=" -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 
@@ -73,7 +72,7 @@ fi
 
 # Configure, build, install
 cmake $CMAKE_OPTS $DIR_ROOT
-make -j ${BUILD_JOBS:-8} VERBOSE=${BUILD_VERBOSE:-}
+make -j ${BUILD_JOBS:-8} VERBOSE=${BUILD_VERBOSE:-1}
 make install
 
 exit
