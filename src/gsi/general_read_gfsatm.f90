@@ -197,6 +197,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
   use mpimod, only: npe,mpi_comm_world,ierror,mpi_rtype
   use general_sub2grid_mod, only: sub2grid_info
   use ncepnems_io, only: imp_physics
+  use jfunc, only: cnvw_option
   implicit none
 
 ! !INPUT PARAMETERS:
@@ -232,6 +233,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
 ! !AUTHOR:
 !   treadon          org: np23                date: 2004-05-14
 !
+!   tong  g_ni and g_nr are place holder for g_cnvw, g_cnvc for GFDL MP
 !EOP
 !-------------------------------------------------------------------------
 
@@ -394,7 +396,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                g_qg(i,j,klev)=sub(ij,k)
             enddo
          enddo
-      elseif ( iflag(k) == 15 .and. imp_physics == 8) then
+      elseif ( iflag(k) == 15 .and. (imp_physics == 8 .or. cnvw_option)) then
          klev=ilev(k)
          ij=0
          do j=1,grd%lon2
@@ -403,7 +405,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                g_ni(i,j,klev)=sub(ij,k)
             enddo
          enddo
-      elseif ( iflag(k) == 16 .and. imp_physics == 8) then
+      elseif ( iflag(k) == 16 .and. (imp_physics == 8 .or. cnvw_option)) then
          klev=ilev(k)
          ij=0
          do j=1,grd%lon2
@@ -2828,6 +2830,7 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                           close_dataset, get_dim, read_vardata,get_idate_from_time_units
    use gfsreadmod, only: general_reload2, general_reload_sfc
    use ncepnems_io, only: imp_physics
+   use jfunc, only: cnvw_option
 
    implicit none
 
@@ -3058,8 +3061,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
        call gsi_bundlegetpointer(gfs_bundle,'qs',g_qs  ,ier);istatus1=istatus1+ier
        call gsi_bundlegetpointer(gfs_bundle,'qg',g_qg  ,ier);istatus1=istatus1+ier
     !  call gsi_bundlegetpointer(gfs_bundle,'cf',g_cf  ,ier);istatus1=istatus1+ier
-       call gsi_bundlegetpointer(gfs_bundle,'ni',g_ni  ,ier);istatus1=istatus1+ier
-       call gsi_bundlegetpointer(gfs_bundle,'nr',g_nr  ,ier);istatus1=istatus1+ier
+       if (imp_physics == 8) then
+         call gsi_bundlegetpointer(gfs_bundle,'ni',g_ni  ,ier);istatus1=istatus1+ier
+         call gsi_bundlegetpointer(gfs_bundle,'nr',g_nr  ,ier);istatus1=istatus1+ier
+       else if (cnvw_option) then
+         call gsi_bundlegetpointer(gfs_bundle,'cnvw',g_ni  ,ier);istatus1=istatus1+ier
+         call gsi_bundlegetpointer(gfs_bundle,'cnvc',g_nr  ,ier);istatus1=istatus1+ier
+       endif
        if ( istatus1 /= 0 ) then
           if ( mype == 0 ) then
              write(6,*) 'general_read_gfsatm_allhydro_nc: ERROR'

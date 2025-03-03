@@ -2127,7 +2127,7 @@ subroutine cads_imager_calc(obstype,isis,nobs,nreal,nchanl,nsig,data_s,init_pass
    integer(i_kind) :: itmp1_cads, itmp2_cads, nchanl_cads, maxinfo, dval_info, cads_info, error_status
    integer(i_kind),allocatable,dimension(:) :: ich_cads
    logical :: imager_spccoeff, imager_taucoeff
-   real(r_kind) :: dtime, clw_guess, ciw_guess, rain_guess, snow_guess
+   real(r_kind) :: dtime, clw_guess, ciw_guess, rain_guess, snow_guess, graupel_guess
    real(r_kind) :: trop5, tzbgr, dtsavg, sfc_speed 
    real(r_kind),dimension(nsig) :: qvp, tvp, qs, prsltmp
    real(r_kind),dimension(nsig+1) :: prsitmp
@@ -2207,7 +2207,8 @@ subroutine cads_imager_calc(obstype,isis,nobs,nreal,nchanl,nsig,data_s,init_pass
        if ( sum(data_s(maxinfo+1:maxinfo+7,n)) > 0.90_r_kind ) then  ! imager cluster information exists for this profile
          data_s_cads = data_s(1:nreal+nchanl_cads,n)
          call call_crtm(obstype_cads,dtime,data_s_cads,nchanl_cads,nreal,ich_cads, &
-              tvp,qvp,qs,clw_guess,ciw_guess,rain_guess,snow_guess,prsltmp,prsitmp, &
+              tvp,qvp,qs,clw_guess,ciw_guess,rain_guess,snow_guess,graupel_guess, &
+              prsltmp,prsitmp, &
               trop5,tzbgr,dtsavg,sfc_speed,tsim_cads,emissivity_cads,chan_level_cads, &
               ptau5_cads,ts_cads,emissivity_k_cads,temp_cads,wmix_cads,jacobian_cads,error_status) 
 

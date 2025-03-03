@@ -40,6 +40,10 @@ module crtm_interface
 !   2019-03-13  eliu    - add quality control to identify areas with cold-air outbreak 
 !   2019-03-13  eliu    - add calculation of GFDL cloud fraction 
 !   2019-03-22  Wei/Martin - Added VIIRS AOD capability alongside MODIS AOD
+!   2022-10-17  mtong   - update calculation of GFDL cloud fraction and effective radius
+!   2022-12-28  mtong   - add capability to specify hydrotable format and file
+!                         name
+!   2023-01-05  mtong   - add option to compute water content from mixing ratio and dry air mass
 !   
 !
 ! subroutines included:
@@ -53,10 +57,11 @@ module crtm_interface
 !
 !$$$ end documentation block
 
-use kinds,only: r_kind,i_kind,r_single
+use kinds,only: r_kind,i_kind,r_single,r_double
 use crtm_module, only: crtm_atmosphere_type,crtm_surface_type,crtm_geometry_type, &
     crtm_options_type,crtm_rtsolution_type,crtm_destroy,crtm_options_destroy, &
-    crtm_options_create,crtm_options_associated,success,crtm_atmosphere_create, &
+    crtm_options_create,crtm_options_associated,crtm_options_inspect, &
+    success,crtm_atmosphere_create,crtm_atmosphere_inspect, &
     crtm_surface_create,crtm_k_matrix,crtm_forward, &   
     ssu_input_setvalue, &
     crtm_channelinfo_type, &
@@ -199,7 +204,7 @@ public isazi_ang2           ! = 37 index of solar azimuth angle (degrees)
   integer(i_kind),save :: indx_p25, indx_dust1, indx_dust2
   logical        ,save :: lwind
   logical        ,save :: cld_sea_only_wk
-  logical        ,save :: lprecip_wk 
+  logical        ,save :: lprecip_wk
   logical        ,save :: mixed_use
   logical        ,save :: use_gfdl_qsat 
   integer(i_kind), parameter :: min_n_absorbers = 2
@@ -323,7 +328,7 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
   use crtm_module, only: mass_mixing_ratio_units,co2_id,o3_id,crtm_init, &
       crtm_channelinfo_subset, crtm_channelinfo_n_channels, toa_pressure,max_n_layers, &
       volume_mixing_ratio_units,h2o_id,ch4_id,n2o_id,co_id
-  use radinfo, only: crtm_coeffs_path
+  use radinfo, only: crtm_coeffs_path,crtm_overlap,hydrotable_format
   use radinfo, only: radjacindxs,radjacnames,jpch_rad,nusis,nuchan
   use aeroinfo, only: aerojacindxs
   use gridmod, only: fv3_full_hydro
@@ -360,6 +365,7 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
   integer(i_kind) :: n_absorbers
   logical quiet
   logical print_verbose
+  character(len=20) :: CloudCoeff_Format, CloudCoeff_File
 
   use_gfdl_qsat=.false.
   print_verbose=.false.
@@ -467,6 +473,13 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
     cld_sea_only_wk = radmod%cld_sea_only
     Load_CloudCoeff = .true.
     lprecip_wk = radmod%lprecip .or. fv3_full_hydro
+    if (trim(hydrotable_format) == 'netcdf') then
+       CloudCoeff_Format = 'netCDF'
+       CloudCoeff_File = 'CloudCoeff.nc'
+    else
+       CloudCoeff_Format = 'Binary'
+       CloudCoeff_File = 'CloudCoeff.bin'
+    endif
  else
     n_actual_clouds_wk = 0
     n_clouds_fwd_wk = 0
@@ -589,7 +602,7 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
         write(6,*)myname_,': crtm_init() on path "'//trim(crtm_coeffs_path)//'"'
     error_status = crtm_init(sensorlist,channelinfo,&
        Process_ID=mype,Output_Process_ID=mype_diaghdr, &
-! for crtm2.4.1 
+! for crtm2.4.1
 !<Aero need to comment out if CRTM doesn't support 
 !       Aerosol_Model=Aerosol_Model,AerosolCoeff_File=AerosolCoeff_File, &
 !       AerosolCoeff_Format=AerosolCoeff_Format, &
@@ -805,6 +818,12 @@ endif
 
  options(1)%use_antenna_correction = .false. 
 
+ if (radmod%lprecip) then
+    options(1)%overlap_id = crtm_overlap
+ else
+    options(1)%overlap_id = 5
+ end if
+
 ! Load surface sensor data structure
 
  surface(1)%sensordata%n_channels = channelinfo(sensorindex)%n_channels
@@ -1000,11 +1019,13 @@ subroutine destroy_crtm
   return
 end subroutine destroy_crtm
 subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
-                   h,q,qs,clw_guess,ciw_guess,rain_guess,snow_guess,prsl,prsi, &
+                   h,q,qs,clw_guess,ciw_guess,rain_guess,snow_guess, &
+                   graupel_guess,prsl,prsi, &
                    trop5,tzbgr,dtsavg,sfc_speed,&
                    tsim,emissivity,chan_level,ptau5,ts, &
                    emissivity_k,temp,wmix,jacobian,error_status,tsim_clr,tcc, & 
-                   tcwv,hwp_ratio,stability,layer_od,jacobian_aero)  
+                   tcwv,hwp_ratio,stability,layer_od,jacobian_aero, &
+                   pcp_mask,jacobian0,atprofile)  
 !$$$  subprogram documentation block
 !                .      .    .                                       .
 ! subprogram:    call_crtm   creates vertical profile of t,q,oz,p,zs,etc., 
@@ -1069,6 +1090,15 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 !     layer_od     - layer optical depth
 !     jacobian_aero- nsigaerojac level jacobians for use in intaod
 !     tsim_clr     - option to output simulated brightness temperatures for clear sky                  
+!     tcc          - total cloud cover
+!     pcp_mask     - option to output pcp_mask
+!     jacobian0    - jacobian on pressure level
+!     atprofile    - atmospheric profile on pressure level
+!     clw_guess    - cloud liquid water path
+!     ciw_guess    - cloud ice water path
+!     rain_guess   - rain water path
+!     snow_guess   - snow water path
+!     graupel_guess - graupel water path
 !
 ! attributes:
 !   language: f90
@@ -1079,10 +1109,12 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   use kinds, only: r_kind,i_kind
   use mpimod, only: mype
   use radinfo, only: ifactq
-  use radinfo, only: nsigradjac
+  use radinfo, only: nsigradjac,crtm_overlap,allsky_gfdl,allsky_verbose
+  use radinfo, only: cloud_mask_option, mask_threshold
   use gsi_nstcouplermod, only: nst_gsi
   use guess_grids, only: ges_tsen,&
       ges_prsl,ges_prsi,ges_qsat,tropprs,dsfct,add_rtm_layers, &
+      add_rtm_layers_gfdl, &
       hrdifsig,nfldsig,hrdifsfc,nfldsfc,ntguessfc,isli2,sno2, &
       hrdifaer,nfldaer ! for separate aerosol input file
   use cloud_efr_mod, only: efr_ql,efr_qi,efr_qr,efr_qs,efr_qg,efr_qh
@@ -1091,7 +1123,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   use gsi_chemguess_mod, only: gsi_chemguess_get
   use gsi_metguess_mod,  only: gsi_metguess_bundle   ! for now, a common block
   use gsi_metguess_mod,  only: gsi_metguess_get
-  use gridmod, only: istart,jstart,nlon,nlat,lon1,rlats,rlons
+  use gridmod, only: istart,jstart,nlon,nlat,lon1,rlats,rlons,dlnpm_ratio
   use wrf_params_mod, only: cold_start
   use constants, only: zero,half,one,one_tenth,r0_05,r10,r100,r1000,constoz,grav,rad2deg, &
       sqrt_tiny_r_kind,constoz,two,three,four,five,t0c,rd,eps,rd_over_cp,rearth
@@ -1129,6 +1161,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind),dimension(nsig,nchanl)   ,intent(  out) :: temp,ptau5,wmix
   real(r_kind),dimension(nsigradjac,nchanl),intent(out):: jacobian
   real(r_kind)                          ,intent(  out) :: clw_guess,ciw_guess,rain_guess,snow_guess
+  real(r_kind)                          ,intent(  out) :: graupel_guess
   real(r_kind),dimension(nchanl)        ,intent(  out), optional  :: tsim_clr      
   real(r_kind),dimension(nchanl)        ,intent(  out), optional  :: tcc       
   real(r_kind)                          ,intent(  out), optional  :: tcwv              
@@ -1136,6 +1169,9 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind)                          ,intent(  out), optional  :: stability       
   real(r_kind),dimension(nsigaerojac,nchanl),intent(out),optional :: jacobian_aero
   real(r_kind),dimension(nsig,nchanl)   ,intent(  out)  ,optional :: layer_od
+  logical                               ,intent(  out)  ,optional :: pcp_mask
+  real(4),dimension(msig,10)            ,intent(  out)  ,optional :: atprofile
+  real(4),dimension(msig*8,nchanl)      ,intent(  out)  ,optional :: jacobian0
 
 ! Declare local parameters
   character(len=*),parameter::myname_=myname//'*call_crtm'
@@ -1168,7 +1204,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 ! Constrained indexing for lai
 ! CRTM 2.1 implementation change
 ! ******************************
-  integer(i_kind):: lai_type
+  integer(i_kind):: lai_type, isfctype
 
   real(r_kind):: wind10,wind10_direction,windratio,windangle 
   real(r_kind):: w00,w01,w10,w11,kgkg_kgm2,f10,panglr,dx,dy
@@ -1191,6 +1227,8 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind),dimension(0:3)   :: dtskin
   real(r_kind),dimension(msig)  :: c6
   real(r_kind),dimension(nsig)  :: c3
+  real(r_kind),dimension(nsig)  :: dp   ! delp (Pa)
+  real(r_kind),dimension(nsig)  :: plyr ! layer mean pressure (Pa)
   real(r_kind),dimension(nsig) :: ugkg_kgm2,cwj
   real(r_kind),dimension(nsig) :: rho_air   ! density of air (kg/m3)
   real(r_kind),dimension(nsig) :: cf_calc   ! GFDL cloud fraction calculation
@@ -1218,7 +1256,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind),pointer,dimension(:,:,:)::nrges_itsig =>NULL()
   real(r_kind),pointer,dimension(:,:,:)::nrges_itsigp=>NULL()  
   logical  :: lmfdeep2
-  logical :: sea,icmask
+  logical :: sea,icmask,land,ice,snow,mixed
 
   integer(i_kind),parameter,dimension(12):: mday=(/0,31,59,90,&
        120,151,181,212,243,273,304,334/)
@@ -1233,6 +1271,8 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   if (present(hwp_ratio)) hwp_ratio=zero  
   if (present(tcwv)) tcwv=zero           
   if (present(tcc)) tcc=zero           
+  if (present(jacobian0)) jacobian0=zero
+  if (present(atprofile)) atprofile=zero
 
   if (n_clouds_fwd_wk>0) then
      cloud = zero
@@ -1375,9 +1415,9 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ier=ier+istatus
   call gsi_bundlegetpointer(gsi_metguess_bundle(itsigp),'v' ,vges_itsigp ,istatus)
   ier=ier+istatus
-  call gsi_bundlegetpointer(gsi_metguess_bundle(itsig ),'oz',ozges_itsig ,iozs)
+  call gsi_bundlegetpointer(gsi_metguess_bundle(itsig ),'oz',ozges_itsig ,istatus)
   iozs=istatus
-  call gsi_bundlegetpointer(gsi_metguess_bundle(itsigp),'oz',ozges_itsigp,iozs)
+  call gsi_bundlegetpointer(gsi_metguess_bundle(itsigp),'oz',ozges_itsigp,istatus)
   iozs=iozs+istatus
 
   call gsi_bundlegetpointer(gsi_metguess_bundle(itsig ),'q',qges_itsig ,istatus)
@@ -1622,6 +1662,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
            surface(1)%snow_depth            = data_s(isn)
 
            sea = min(max(zero,data_s(ifrac_sea)),one)  >= 0.99_r_kind 
+           land = min(max(zero,data_s(ifrac_lnd)),one)  >= 0.99_r_kind
+           ice  = min(max(zero,data_s(ifrac_ice)),one)  >= 0.99_r_kind
+           snow = min(max(zero,data_s(ifrac_sno)),one)  >= 0.99_r_kind
+           mixed = .not. sea  .and. .not. ice .and.  &
+                   .not. land .and. .not. snow
            icmask = (sea .and. cld_sea_only_wk) .or. (.not. cld_sea_only_wk) 
 
 !       assign tzbgr for Tz retrieval when necessary
@@ -1835,6 +1880,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
      if (n_clouds_fwd_wk>0) then
         rho_air(k) = eps*(10.0_r_kind*100.0_r_kind*prsl(k))/(rd*h(k)*(q(k)+eps)) 
+        qcond(k)=zero
         do ii=1,n_clouds_fwd_wk
            iii=jcloud(ii)
            cloud(k,ii) =(gsi_metguess_bundle(itsig )%r3(icloud(iii))%q(ix ,iy ,k)*w00+ &     ! kg/kg
@@ -1846,6 +1892,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                          gsi_metguess_bundle(itsigp)%r3(icloud(iii))%q(ix ,iyp,k)*w01+ &
                          gsi_metguess_bundle(itsigp)%r3(icloud(iii))%q(ixp,iyp,k)*w11)*dtsigp
            cloud(k,ii)=max(cloud(k,ii),zero)
+           qcond(k) = qcond(k) + cloud(k,ii)
 
            if (regional .and. (.not. wrf_mass_regional)) then
                if (trim(cloud_names(iii))== 'ql' ) then
@@ -1881,6 +1928,10 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                end if
             end if
         end do  
+        if (allsky_gfdl) then
+           c3(k)=r1000/(one-q(k)-qcond(k))
+           qmix(k)=q(k)*c3(k)  !conver specific humidity to mixing ratio
+        endif
      endif ! <n_clouds_fwd_wk>
   end do
   ! Calculate GFDL effective radius for each hydrometeor
@@ -1902,7 +1953,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
   ! Calculate GFDL cloud fraction (if no cf in metguess table) based on PDF scheme 
   ! if ( icmask .and. n_clouds_fwd_wk > 0 .and. imp_physics==11 .and.  lcalc_gfdl_cfrac ) then
-  if ( icmask .and. n_clouds_fwd_wk > 0 .and. imp_physics==11 .and.  lprecip_wk ) then
+  if ( icmask .and. n_clouds_fwd_wk > 0 .and. imp_physics==11 .and.  lprecip_wk .and. .not. allsky_gfdl) then
      cf_calc  = zero
      call calc_gfdl_cloudfrac(rho_air,h,q,cloud,hs,garea,qs,cf_calc)
      cf   = cf_calc
@@ -1929,12 +1980,43 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               ges_prsi(ix ,iyp,nsig+1,itsigp)*w01+ &
               ges_prsi(ixp,iyp,nsig+1,itsigp)*w11)*dtsigp
 
+  do k=1,nsig
+     dp(k) = (prsi(k)-prsi(k+1))*r1000  ! in Pa
+     plyr(k) = dp(k) / (log(prsi(k))-log(prsi(k+1)))
+  enddo
+
+  if ( icmask .and. n_clouds_fwd_wk > 0 .and. imp_physics==11 .and. lprecip_wk .and. allsky_gfdl) then
+     ! Calculate GFDL cloud fraction (if no cf in metguess table) based on PDF scheme
+     cf_calc  = zero
+     call compute_cloud_fraction(garea,q,qs,plyr,hs,cf_calc)
+     cf   = cf_calc
+     icfs = 0        ! load cloud fraction into CRTM 
+
+     ! Calculate GFDL effective radius for each hydrometeor
+     if(sea) then
+        isfctype=0
+     else if(land) then
+        isfctype=1
+     else if(ice) then
+        isfctype=2
+     else if(snow) then
+        isfctype=3
+     else if(mixed) then
+        isfctype=4
+     endif
+     call compute_effective_radius(plyr,dp,h,q,cf,isfctype,data_s(isn),mype)
+  endif
+
 ! if(any(prsl<zero)) call die(myname_,': negative pressure found',3)
 ! if(any(prsi<zero)) call die(myname_,': negative pressure found',4)
 
 ! Add additional crtm levels/layers to profile       
 
-  call add_rtm_layers(prsi,prsl,prsi_rtm,prsl_rtm,klevel)
+  if (dlnpm_ratio < 0.0) then
+     call add_rtm_layers(prsi,prsl,prsi_rtm,prsl_rtm,klevel)
+  else
+     call add_rtm_layers_gfdl(prsi,prsl,prsi_rtm,prsl_rtm,klevel,mype)
+  end if
 ! if(any(prsi_rtm<zero)) call die(myname_,': negative pressure found',5)
 ! if(any(prsl_rtm<zero)) call die(myname_,': negative pressure found',5)
 
@@ -2053,6 +2135,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ciw_guess = zero
   rain_guess = zero
   snow_guess = zero
+  graupel_guess = zero
 
   if (n_actual_aerosols_wk>0) then
      do k = 1, nsig
@@ -2077,11 +2160,17 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
      kk2 = klevel(kk)
      atmosphere(1)%temperature(k) = h(kk2)
      atmosphere(1)%absorber(k,1)  = q(kk2)*c3(kk2)
+     if(present(atprofile))then
+        atprofile(k,1)=atmosphere(1)%pressure(k)
+        atprofile(k,2)=atmosphere(1)%temperature(k)
+        atprofile(k,3)=atmosphere(1)%absorber(k,1)
+     end if
      if(iozs==0) then
         atmosphere(1)%absorber(k,2)  = poz(kk2)
      else
         atmosphere(1)%absorber(k,2)  = O3_ID
      endif
+     if(present(atprofile)) atprofile(k,4)=atmosphere(1)%absorber(k,2)
      if (n_ghg > 0) then
         do ig=1,n_ghg
            j=min_n_absorbers+ ig
@@ -2099,12 +2188,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
      if (n_clouds_fwd_wk>0) then
         kgkg_kgm2=(atmosphere(1)%level_pressure(k)-atmosphere(1)%level_pressure(k-1))*r100/grav
+        c6(k) = kgkg_kgm2
+        auxdp(k)=abs(prsi_rtm(kk+1)-prsi_rtm(kk))*r10
+        auxq (k)=q(kk2)
         if ((cw_cv.or.ql_cv).and.(.not. lprecip_wk)) then
           if (icmask) then 
-              c6(k) = kgkg_kgm2
-              auxdp(k)=abs(prsi_rtm(kk+1)-prsi_rtm(kk))*r10
-              auxq (k)=q(kk2)
-
               if (regional .and. (.not. wrf_mass_regional) .and. (.not. cold_start)) then
                  do ii=1,n_clouds_fwd_wk
                     cloud_cont(k,ii)=cloud(kk2,ii)*c6(k)
@@ -2120,6 +2208,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               ciw_guess = ciw_guess +  cloud_cont(k,2)
               if(n_clouds_fwd_wk > 2) rain_guess = rain_guess +  cloud_cont(k,3)
               if(n_clouds_fwd_wk > 3) snow_guess = snow_guess +  cloud_cont(k,4)
+              if(n_clouds_fwd_wk > 4) graupel_guess = graupel_guess + cloud_cont(k,5)
 
               do ii=1,n_clouds_fwd_wk
                  if (ii==1 .and. atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) &
@@ -2130,10 +2219,17 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
           endif   
         else 
            if (icmask) then
-              c6(k) = kgkg_kgm2  
+              if (allsky_gfdl) then
+                 ! c6: dry air mass, level_pressure computed from surface pressure with hydrometeors excluded
+                 c6(k) = kgkg_kgm2 * (one-q(kk2))
+              endif
               do ii=1,n_clouds_fwd_wk
-                !cloud_cont(k,ii)=cloud(kk2,ii)*kgkg_kgm2 
-                 cloud_cont(k,ii)=cloud(kk2,ii)*c6(k)
+                 if (allsky_gfdl) then
+                    ! water content = dp * qxz / g (dp: dry air mass, qxz: mixing ratio = q * c3)
+                    cloud_cont(k,ii)=cloud(kk2,ii)*c3(kk2)*c6(k)*0.001_r_kind
+                 else
+                    cloud_cont(k,ii)=cloud(kk2,ii)*c6(k)
+                 endif
                  if (lprecip_wk .and.  cloud_cont(k,ii) > 1.0e-6_r_kind) then
                     cloud_efr(k,ii)=cloudefr(kk2,ii)
                  else
@@ -2159,26 +2255,33 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                 !Add lower bound to all hydrometers 
                 !note: may want to add lower bound value for effective radius  
               do ii=1,n_clouds_fwd_wk
-                 if (trim(cloud_names_fwd(ii))=='ql' .and.  atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) then
-                     cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
-                     cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                 if (.not. allsky_gfdl) then 
+                    if (trim(cloud_names_fwd(ii))=='ql' .and.  atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) then
+                        cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
+                        cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                    endif
+                    if (trim(cloud_names_fwd(ii))=='qi' .and.  atmosphere(1)%temperature(k)<t0c) then
+                        cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
+                        cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                    endif
+                    if (trim(cloud_names_fwd(ii))=='qr' .and.  atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) then
+                        cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
+                        cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                    endif
+                    if (trim(cloud_names_fwd(ii))=='qs' .and.  atmosphere(1)%temperature(k)<t0c) then
+                        cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
+                        cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                    endif
+                    if (trim(cloud_names_fwd(ii))=='qg' .and.  atmosphere(1)%temperature(k)<t0c) then
+                        cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
+                        cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
+                    endif
                  endif
-                 if (trim(cloud_names_fwd(ii))=='qi' .and.  atmosphere(1)%temperature(k)<t0c) then
-                     cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
-                     cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
-                 endif
-                 if (trim(cloud_names_fwd(ii))=='qr' .and.  atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) then
-                     cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
-                     cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
-                 endif
-                 if (trim(cloud_names_fwd(ii))=='qs' .and.  atmosphere(1)%temperature(k)<t0c) then
-                     cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
-                     cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
-                 endif
-                 if (trim(cloud_names_fwd(ii))=='qg' .and.  atmosphere(1)%temperature(k)<t0c) then
-                     cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
-                     cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
-                 endif
+                 if (trim(cloud_names_fwd(ii))=='ql') clw_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qi') ciw_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qr') rain_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qs') snow_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qg') graupel_guess=hwp_guess(ii)
               end do
 !             In CRTM, if cloud fraction of the layer < 1.0E-12, set cloud content and
 !             effective radius of all hydrometer types in that layer to zero
@@ -2189,8 +2292,10 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                    atmosphere(1)%cloud_fraction(k)=1.001_r_kind*1.0E-12_r_kind
                  end if
               end do
+              !call crtm_options_inspect(options(1))
            end if
         endif
+        if(present(atprofile)) atprofile(k,5)=atmosphere(1)%cloud_fraction(k)
      endif
   
 !    Add in a drop-off to absorber amount in the stratosphere to be in more
@@ -2207,6 +2312,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
         idx700   = k
      endif
   end do
+
+  !if (n_clouds_fwd_wk>0 .and. icmask) then
+  !   call Compute_Average_Overlap(klevel)
+  !   if (crtm_overlap == 1) atmosphere(1)%cloud_fraction = cf_tmp
+  !end if
 
   if (n_clouds_fwd_wk>0 .and. icmask) then
      if ((hwp_guess(1)+hwp_guess(2))>=1.0e-06_r_kind .and. present(hwp_ratio)) hwp_ratio = hwp_guess(1)/(hwp_guess(1)+hwp_guess(2)) 
@@ -2237,10 +2347,24 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
         call Set_CRTM_Aerosol ( msig, n_actual_aerosols_wk, n_aerosols_fwd_wk, aerosol_names, aero_conc, auxrh, &
                              atmosphere(1)%aerosol )
      end if
+!    call crtm_atmosphere_inspect( atmosphere )
   endif
 
 ! Call CRTM K Matrix model
 
+  if (present(pcp_mask)) then
+     if (cloud_mask_option == 0) then
+        pcp_mask=(rain_guess > mask_threshold .or. &
+                  snow_guess > mask_threshold .or. &
+                  graupel_guess > mask_threshold )
+     else
+        pcp_mask=(rain_guess > mask_threshold .or. &
+                  snow_guess > mask_threshold .or. &
+                  graupel_guess > mask_threshold .or. &
+                  clw_guess > mask_threshold .or. &
+                  ciw_guess > mask_threshold )
+     end if
+  end if
 
   error_status = 0
   if ( trim(obstype) /= 'modis_aod' .and. trim(obstype) /= 'viirs_aod' ) then
@@ -2383,7 +2507,6 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 !   wmix  - moisture sensitivity
 !   omix  - ozone sensitivity
 !   ptau5 - layer transmittance
-       
        do k=1,msig
           kk = klevel(msig-k+1)
           temp(kk,i) = temp(kk,i) + atmosphere_k(i,1)%temperature(k)
@@ -2391,6 +2514,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
           omix(kk,i) = omix(kk,i) + atmosphere_k(i,1)%absorber(k,2)
           total_od   = total_od + rtsolution(i,1)%layer_optical_depth(k)
           ptau5(kk,i) = exp(-min(limit_exp,total_od*secant_term))
+          if (present(jacobian0)) then
+              jacobian0(k,i)=atmosphere_k(i,1)%temperature(k)
+              jacobian0(msig+k,i)=atmosphere_k(i,1)%absorber(k,1)
+              jacobian0(2*msig+k,i)=atmosphere_k(i,1)%absorber(k,2)
+          end if
        end do
 
 !  Load jacobian array
@@ -2439,12 +2567,18 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                    end do
                    do k=1,msig
                       kk = klevel(msig-k+1)
+                      if(present(jacobian0))then
+                         jacobian0(msig*(2+ii)+k,i)=atmosphere_k(i,1)%cloud(ii)%water_content(k)
+                      end if
+                      if(present(atprofile))then
+                         atprofile(k,5+ii)=atmosphere(1)%cloud(ii)%water_content(k)
+                      end if
                       cwj(kk) = cwj(kk) + atmosphere_k(i,1)%cloud(ii)%water_content(k)*c6(k)
                    end do
                    do k=1,nsig
                       jacobian(icw(ii)+k,i) = cwj(k)
                    end do ! <nsig>
-                 end do
+                end do
              else
                 do ii=1,n_clouds_jac_wk
                    do k=1,nsig
@@ -2550,7 +2684,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ! Parameters for water cloud
   real(r_kind), parameter :: ccn        =  1.0e8_r_kind
   real(r_kind), parameter :: rho_w      = 1000.0_r_kind     ! [kg/m3 ]
-  real(r_kind), parameter :: reff_w_min =    5.0_r_kind     ! 
+  real(r_kind), parameter :: reff_w_min =    5.0_r_kind     !
   real(r_kind), parameter :: reff_w_max =   10.0_r_kind
 
   ! Parameters for ice cloud (Hemisfield and mcFarquhar 1996)
@@ -2569,7 +2703,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ! Parameters for rain  (Lin 1983)
   real(r_kind), parameter :: rho_r      =    1000.0_r_kind  ! [kg/m3 ]
   real(r_kind), parameter :: no_r       =     8.0e6_r_kind  ! [m-4   ]
-  real(r_kind), parameter :: reff_r_min =       0.0_r_kind  ! [micron] 
+  real(r_kind), parameter :: reff_r_min =       0.0_r_kind  ! [micron]
   real(r_kind), parameter :: reff_r_max =   10000.0_r_kind  ! [micron]
   real(r_kind), parameter :: alpha_r    =       0.8_r_kind
   real(r_kind), parameter :: gamma_r    = 17.837789_r_kind
@@ -2578,15 +2712,15 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ! Parameters for snow  (Lin 1983)
   real(r_kind), parameter :: rho_s      =     100.0_r_kind  ! [kg/m3 ]
   real(r_kind), parameter :: no_s       =     3.0e6_r_kind  ! [m-4   ]
-  real(r_kind), parameter :: reff_s_min =       0.0_r_kind  ! [micron] 
+  real(r_kind), parameter :: reff_s_min =       0.0_r_kind  ! [micron]
   real(r_kind), parameter :: reff_s_max =   10000.0_r_kind  ! [micron]
   real(r_kind), parameter :: alpha_s    =      0.25_r_kind
   real(r_kind), parameter :: gamma_s    = 8.2850630_r_kind
   real(r_kind) :: lam_s
   ! Parameters for graupel  (Lin 1983)
   real(r_kind), parameter :: rho_g      =     400.0_r_kind  ! [kg/m3 ]
-  real(r_kind), parameter :: no_g       =     4.0e6_r_kind  ! [m-4   ]  
-  real(r_kind), parameter :: reff_g_min =       0.0_r_kind  ! [micron] 
+  real(r_kind), parameter :: no_g       =     4.0e6_r_kind  ! [m-4   ]
+  real(r_kind), parameter :: reff_g_min =       0.0_r_kind  ! [micron]
   real(r_kind), parameter :: reff_g_max =   10000.0_r_kind  ! [micron]
   real(r_kind), parameter :: alpha_g    =       0.5_r_kind
   real(r_kind), parameter :: gamma_g    = 11.631769_r_kind
@@ -2601,12 +2735,12 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
         if (qx > qmin) then
            reff(k) = exp (1.0_r_kind / 3.0_r_kind * log ((3.0_r_kind * qx) / (4.0_r_kind * pi * rho_w * ccn))) * 1.0e6_r_kind
            reff(k) = max(reff_min, min(reff_max, reff(k)))
-        !  reff(k) = 10.0_r_kind  
+        !  reff(k) = 10.0_r_kind
         else
            reff(k) = zero
         endif
      enddo
-  ! Cloud Ice 
+  ! Cloud Ice
   else if (trim(cloud_name)=='qi') then
      ! Hemisfield and mcFarquhar (1996)
      reff_min = reff_i_min
@@ -2625,12 +2759,12 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               reff(k) = beta / bice4 * exp ((1.0_r_kind - pice4) * log (1.0e3_r_kind * qx)) * 1.0e3_r_kind
            endif
            reff(k) = max(reff_min, min(reff_max, reff(k)))
-        !  reff(k) = 30.0_r_kind  
+        !  reff(k) = 30.0_r_kind
         else
            reff(k) = zero
         endif
      enddo
-  ! Rain 
+  ! Rain
   else if (trim(cloud_name)=='qr') then
      reff_min = reff_r_min
      reff_max = reff_r_max
@@ -2641,12 +2775,12 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
            reff(k) = 0.5_r_kind * (3.0_r_kind/ lam_r ) * 1.0e6_r_kind
         !  reff(k) = 0.5_r_kind * exp (log (gamma_r / 6.0_r_kind) / alpha_r) / lam_r * 1.0e6_r_kind  !orig
            reff(k) = max(reff_min, min(reff_max, reff(k)))
-        !  reff(k) = 300.0_r_kind  
+        !  reff(k) = 300.0_r_kind
         else
            reff(k) = zero
         endif
      enddo
-  ! Snow 
+  ! Snow
   else if (trim(cloud_name)=='qs') then
      reff_min = reff_s_min
      reff_max = reff_s_max
@@ -2654,15 +2788,15 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
         qx = qxmr(k) * rho_air(k)  ! convert mixing ratio (kg/kg) to water content (kg/m3)
         if (qx > qmin) then
            lam_s   = exp (0.25_r_kind * log (pi * rho_s * no_s / qx ))
-           reff(k) = 0.5_r_kind * (3.0_r_kind/ lam_s ) * 1.0e6_r_kind 
+           reff(k) = 0.5_r_kind * (3.0_r_kind/ lam_s ) * 1.0e6_r_kind
         !  reff(k) = 0.5_r_kind * exp (log (gamma_s / 6.0_r_kind) / alpha_s) / lam_s * 1.0e6_r_kind  !orig
            reff(k) = max(reff_min, min(reff_max, reff(k)))
-        !  reff(k) = 600.0_r_kind  
+        !  reff(k) = 600.0_r_kind
         else
            reff(k) = zero
         endif
      enddo
-  ! Graupel 
+  ! Graupel
   else if (trim(cloud_name)=='qg') then
      reff_min = reff_g_min
      reff_max = reff_g_max
@@ -2670,15 +2804,15 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
         qx = qxmr(k)*rho_air(k)    ! convert mixing ratio (kg/kg) to water content (kg/m3)
         if (qx > qmin) then
            lam_g   = exp (0.25_r_kind * log (pi * rho_g * no_g / qx ))
-           reff(k) = 0.5_r_kind * (3.0_r_kind/ lam_g ) * 1.0e6_r_kind 
+           reff(k) = 0.5_r_kind * (3.0_r_kind/ lam_g ) * 1.0e6_r_kind
         !  reff(k) = 0.5_r_kind * exp (log (gamma_g / 6.0_r_kind) / alpha_g) / lam_g * 1.0e6_r_kind
            reff(k) = max(reff_min, min(reff_max, reff(k)))
-        !  reff(k) = 600.0_r_kind  
+        !  reff(k) = 600.0_r_kind
         else
            reff(k) = zero
         endif
      enddo
-  ! Mysterious 
+  ! Mysterious
   else
      call die(myname_,"cannot recognize cloud name <"//trim(myname_)//">")
   endif
@@ -2869,8 +3003,8 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   subroutine calc_gfdl_cloudfrac(den,pt1,qv,cloud,hs,area,qsat,cfrac)
 !$$$  subprogram documentation block
 !                .      .    .                                       .
-! subprogram:    calc_gfdl_cloudfrac  calculate GFDL cloud fraction 
-!                                     based on PDF scheme 
+! subprogram:    calc_gfdl_cloudfrac  calculate GFDL cloud fraction
+!                                     based on PDF scheme
 !
 !   prgmmr:      eliu
 !
@@ -2881,33 +3015,33 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 !   2018-08-31   eliu
 !
 !   input argument list:
-!     den       - density of air  
+!     den       - density of air
 !     pt1       - sensible temperature
-!     qv        - specific humidity 
-!     cloud     - hydrometeor mixing ratio 
-!     hs        - surface elevation 
-!     area      - analysis grid area   
-!     cfrac     - cloud fraction 
+!     qv        - specific humidity
+!     cloud     - hydrometeor mixing ratio
+!     hs        - surface elevation
+!     area      - analysis grid area
+!     cfrac     - cloud fraction
 !
 !   output argument list:
-!     cfrac     - cloud fraction 
+!     cfrac     - cloud fraction
 !
 !   language: f90
-!   
+!
 !$$$
 !--------
 
   use constants, only: one, zero, ten, half, grav
-  use constants, only: tice,t_wfr,rvgas,hlv,hlf,c_liq,c_ice,cp_air,cv_air 
+  use constants, only: tice,t_wfr,rvgas,hlv,hlf,c_liq,c_ice,cp_air,cv_air
 
   implicit none
 !
 ! Declare passed variables
    real(r_kind), dimension(nsig)                 ,intent(in   ) :: den    ! air density[ kg/m3  ]
-   real(r_kind), dimension(nsig)                 ,intent(in   ) :: pt1    !  sensible temperature[ K ] 
+   real(r_kind), dimension(nsig)                 ,intent(in   ) :: pt1    !  sensible temperature[ K ]
    real(r_kind), dimension(nsig)                 ,intent(in   ) :: qv     !  specific humudity
    real(r_kind), dimension(nsig,n_clouds_fwd_wk) ,intent(in   ) :: cloud  !  hydroeteor mixing ratio
-   real(r_kind),                                  intent(in   ) :: hs     !  surface elevation [ m ] 
+   real(r_kind),                                  intent(in   ) :: hs     !  surface elevation [ m ]
    real(r_kind),                                  intent(in   ) :: area   !  analysis grid area [ m2 ]
    real(r_kind), dimension(nsig)                 ,intent(in   ) :: qsat   !  saturation specific humidity
    real(r_kind), dimension(nsig)                 ,intent(inout) :: cfrac  !  cloud fraction  
@@ -2917,9 +3051,9 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   integer(i_kind) :: i,k
   integer(i_kind) :: icloud_f
   real(r_kind), parameter :: qrmin   = 1.0e-8_r_kind
-  real(r_kind), parameter :: qvmin   = 1.0e-20_r_kind ! min value for water vapor 
+  real(r_kind), parameter :: qvmin   = 1.0e-20_r_kind ! min value for water vapor
   real(r_kind), parameter :: qcmin   = 1.0e-12_r_kind ! min value for cloud condensates
-  real(r_kind), parameter :: cld_min = 0.05_r_kind    ! min value for cloud fraction 
+  real(r_kind), parameter :: cld_min = 0.05_r_kind    ! min value for cloud fraction
   real(r_kind) :: tin,qsi,qsw
   real(r_kind) :: qpz,q_cond,rh,hvar,cvm
   real(r_kind) :: rqi,dq,d0_vap,dc_ice,lv00,li00
@@ -2936,9 +3070,9 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
 !  parameters
   icloud_f = 1
-  cv_vap   = 3.0_r_kind * rvgas ! heat capacity of water vapor at constant volume (non-hydrostatic) cv_vap=1384.5 
+  cv_vap   = 3.0_r_kind * rvgas ! heat capacity of water vapor at constant volume (non-hydrostatic) cv_vap=1384.5
   cp_vap   = 4.0_r_kind * rvgas ! heat capacity of water voiar at constant pressure (hydrostatic)   cp_vap=1846.0
-  dw_land  = 0.20_r_kind        ! base value for subgrid variability over land 
+  dw_land  = 0.20_r_kind        ! base value for subgrid variability over land
   dw_ocean = 0.10_r_kind        ! base value for subgrid variability over ocean
   hydrostatic = .false.         ! default
 
@@ -2952,7 +3086,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
 ! Derived parameters
   dc_ice = c_liq - c_ice        ! isobaric heating/cooling (2213.5)
-  d0_vap = c_vap - c_liq        ! d0_vap = cv_vap-cliq = -2801.0 
+  d0_vap = c_vap - c_liq        ! d0_vap = cv_vap-cliq = -2801.0
 ! dc_vap = c_vap - c_liq        ! dc_vap = cp_vap-cliq = -2339.5
   lv00   = hlv - d0_vap * tice  ! evaporation latent heat coefficient at 0 deg (3139057.82)
   li00   = hlf - dc_ice * tice  ! fusion latent heat coefficient at 0 deg (-271059.665)
@@ -3555,5 +3689,647 @@ subroutine get_lai(data_s,nchanl,nreal,itime,ilate,lai_type,lai)
 
   return
   end subroutine get_lai
+
+  subroutine compute_cloud_fraction(area,q,qsat,plyr,zs,cloud_fraction)
+
+!$$$  subprogram documentation block
+!                .      .    .                                       .
+! subprogram: compute_cloud_fraction compute vertical profile of cloud fraction
+!   prgmmr: mtong          org: np22                date: 2018-04-24
+!
+! abstract: creates vertical profile of cloud fraction following the method
+!             in GFDL microphysics. Cloud fraction is the new input variable
+!             of CRTM 2.3.0, which is used to estimate total cloud cover
+
+  use constants, only: rearth, zero, one, grav, ten
+  use gridmod, only: rlats, rlons, nlon
+
+  implicit none
+
+  real(r_kind), intent(in)        :: area               ! grid area [m^2]
+  real(r_kind), intent(in)        :: q(nsig)            ! specific humidty [kg/kg]
+  real(r_kind), intent(in)        :: qsat(nsig)         ! saturated specific humidty
+  real(r_kind), intent(in)        :: plyr(nsig)         ! layer mean pressure [Pa]
+  real(r_kind), intent(in)        :: zs                 ! surface height
+  real(r_kind), intent(inout)     :: cloud_fraction(nsig)    ! cloud fraction
+
+  integer(i_kind) :: i,k
+  real(r_kind) :: ql,qi,qr,qs,qg
+  real(r_kind) :: q_cond, qpz, rh, pz
+  real(r_kind) :: hvar, dw, tmp, t_lnd, t_ocn, gsize
+  real(r_kind) :: dq, q_plus, q_minus, qa
+
+  real(r_kind), parameter :: qcmin = 1.0e-15 ! min value for cloud condensates (kg/kg)
+
+  integer(i_kind) :: icloud_f ! GFDL cloud scheme
+! 0: subgrid variability based scheme
+! 1: same as 0, but for old fvgfs implementation
+! 2: binary cloud scheme
+! 3: extension of 0
+
+  real(r_kind) :: cld_min   ! minimum cloud fraction
+  real(r_kind) :: dw_ocean  ! ocean parameter used in GFDL cloud fraction calcuation
+  real(r_kind) :: dw_land   ! land parameter used in GFDL cloud fraction calcuation
+  real(r_kind) :: rh_thres  ! minimum relative humidity for cloud fraction
+  real(r_kind) :: f_dq_p    ! cloud fraction adjustment for supersaturation
+  real(r_kind) :: f_dq_m    ! cloud fraction adjustment for undersaturation
+  logical :: do_cld_adj     ! do cloud fraction adjustment
+
+  icloud_f = 0
+  cld_min = 0.05_r_kind
+  dw_ocean = 0.10_r_kind
+  dw_land  = 0.16_r_kind
+  rh_thres = 0.75_r_kind
+!  f_dq_p = 3.0_r_kind
+  f_dq_p = one
+  f_dq_m = one
+  do_cld_adj = .false.
+
+! -----------------------------------------------------------------------
+! subgrid deviation in horizontal direction
+! default area dependent form: use dx ~ 100 km as the base
+! -----------------------------------------------------------------------
+  gsize = sqrt(area)
+  t_lnd = dw_land * sqrt (gsize / 1.e5_r_kind) 
+  t_ocn = dw_ocean * sqrt (gsize / 1.e5_r_kind)
+  tmp = min (one, abs (zs) / ten)
+  hvar = t_lnd * tmp + t_ocn * (one - tmp)
+  hvar = min (0.2_r_kind, max (0.01_r_kind, hvar))
+
+  do k = 1, nsig
+! Combine water species
+     ql=zero; qi=zero; qr=zero; qs=zero; qg=zero
+     do i = 1, n_clouds_fwd_wk
+        if (trim(cloud_names_fwd(i))=='ql') ql = cloud(k,i)
+        if (trim(cloud_names_fwd(i))=='qi') qi = cloud(k,i)
+        if (trim(cloud_names_fwd(i))=='qr') qr = cloud(k,i)
+        if (trim(cloud_names_fwd(i))=='qs') qs = cloud(k,i)
+        if (trim(cloud_names_fwd(i))=='qg') qg = cloud(k,i)
+     end do
+     q_cond = ql + qr + qi + qs + qg
+     qpz = q_cond + q(k)
+
+     rh = qpz / qsat(k)
+
+     if (rh > rh_thres .and. qpz > qcmin) then
+        dq = hvar * qpz
+        if (do_cld_adj) then
+           pz = plyr(k)
+           q_plus = qpz + dq * f_dq_p * min (one, max (zero, (pz - 200.e2_r_kind) / &
+                    (1000.e2_r_kind - 200.e2_r_kind)))
+        else
+           q_plus = qpz + dq * f_dq_p
+        endif
+        q_minus = qpz - dq * f_dq_m
+
+        if (icloud_f == 2) then
+           if (qsat(k) < qpz) then
+              qa = one
+           else
+              qa = zero
+           endif
+        elseif (icloud_f .eq. 3) then
+           if (qsat(k) < qpz) then
+              qa = one
+           else
+              if (qsat(k) < q_plus) then
+                 qa = (q_plus - qsat(k)) / (dq * f_dq_p)
+              else
+                 qa = zero
+              endif
+              if (q_cond > qcmin) then
+                 qa = max (cld_min, qa)
+              endif
+              qa = min (one, qa)
+           endif
+        else
+           if (qsat(k) < q_minus) then
+              qa = one
+           else
+              if (qsat(k) < q_plus) then
+                 if (icloud_f == 0) then
+                    qa = (q_plus - qsat(k)) / (dq * f_dq_p + dq * f_dq_m)
+                 else
+                    qa = (q_plus - qsat(k)) / ((dq * f_dq_p + dq * f_dq_m) * &
+                         (one - q_cond))
+                 endif
+              else
+                 qa = zero
+              endif
+              if (q_cond > qcmin) then
+                 qa = max (cld_min, qa)
+              endif
+              qa = min (one, qa)
+           endif
+        endif
+     else
+        qa = zero
+     endif
+     cloud_fraction(k) = qa
+  end do
+
+  end subroutine compute_cloud_fraction
+
+  subroutine compute_effective_radius(plyr,dp,t,q,cloud_fraction,lsm,snowd, &
+                                      mype,cnvw,cnvi,cnvc)
+
+!$$$  subprogram documentation block
+!                .      .    .                                       .
+! subprogram: compute_cloud_effective_radius
+!             compute vertical profile of cloud effective radius
+!   prgmmr: mtong          org: np22                date: 2018-08-29
+!
+! abstract: creates vertical profile of cloud effective radius
+!
+
+  use constants, only: rvgas,rdgas,grav,pi,r10,r100,r1000,zero,one,two,three, &
+                       four,five,ten,r0_05,t0c,ttp,fv
+  use radinfo, only: rewopt,reiopt,allsky_verbose
+  use jfunc, only: jiter,jiterstart
+
+  implicit none
+
+  real(r_kind), intent(in), dimension(nsig) :: plyr ! model layer mean pressure in Pa
+  real(r_kind), intent(in), dimension(nsig) :: dp ! mass (dry air + water vapor) Pa
+  real(r_kind), intent(in), dimension(nsig) :: t ! temperature (K)
+  real(r_kind), intent(in), dimension(nsig) :: q ! specific humidity (kg/kg)
+  real(r_kind), intent(in), dimension(nsig) :: cloud_fraction
+  integer(i_kind), intent(in) :: lsm ! land sea mask, 0: ocean, 1: land, 2: sea ice, 3: snow, 4: mixed
+  real(r_kind), intent(in) :: snowd
+  integer(i_kind), intent(in) :: mype
+  real(r_kind), intent(in),optional :: cnvw(nsig) ! convective cloud water
+  real(r_kind), intent(in),optional :: cnvi(nsig) ! convective cloud ice
+  real(r_kind), intent(in),optional :: cnvc(nsig) ! convective cloud fraction
+
+  integer(i_kind) :: i,ii,k,ind,mask
+  real(r_kind) :: ql,qi,qr,qs,qg ! specific ratio (mass/total air mass)
+  real(r_kind) :: qmw, qmi, qmr, qms, qmg ! 
+
+  real(r_kind) :: rho ! density (kg / m^3)
+  real(r_kind) :: ccnw
+  real(r_kind) :: cor
+  real(r_kind) :: tc, tem4
+  real(r_kind) :: bw
+  real(r_kind) :: Rmoist
+
+  real(r_kind) :: lambdar, lambdas, lambdag
+  real(r_kind) :: lwc, iwc, rwc, swc, gwc
+  real(r_kind) :: rew, rei, rer, res, reg !  radii (micron)
+
+  real(r_kind), parameter :: rewmin = five
+  real(r_kind), parameter :: rewmax = 15.0_r_kind
+  real(r_kind), parameter :: reimin = ten
+  real(r_kind), parameter :: reimax = 150.0_r_kind
+  real(r_kind), parameter :: rermin = 10.0_r_kind
+  real(r_kind), parameter :: rermax = 10000.0_r_kind
+  real(r_kind), parameter :: resmin = 150.0_r_kind
+  real(r_kind), parameter :: resmax = 10000.0_r_kind
+  real(r_kind), parameter :: regmin = 150.0_r_kind
+  real(r_kind), parameter :: regmax = 10000.0_r_kind
+
+  real(r_kind) :: cldf
+
+  ! cloud diagnosis
+
+  real(r_kind), parameter :: qcmin = 1.0e-15_r_kind ! min value for cloud condensates (kg/kg)
+  real(r_kind), parameter :: beta = 1.22_r_kind ! _efined in heymsfield and mcfarquhar, 1996
+  real(r_kind), parameter :: ccn_o = 90.0_r_kind ! ccn over ocean (cm^ - 3) (36, 280) (GFDL MP v2+)
+  real(r_kind), parameter :: ccn_l = 270.0_r_kind ! ccn over land (cm^ - 3) (375, 1500)
+  real(r_kind), parameter :: rhow = r1000  ! density of cloud water (kg/m^3)
+  real(r_kind), parameter :: rhoi = 9.17e2_r_kind ! density of cloud ice (kg/m^3)
+  real(r_kind), parameter :: rhor = r1000  ! density of rain (Lin et al. 1983) (kg/m^3)
+  real(r_kind), parameter :: rhos = r100  ! density of snow (Lin et al. 1983) (kg/m^3)
+  real(r_kind), parameter :: rhog = 4.0e2_r_kind  ! density of graupel (Rutledge and Hobbs 1984) (kg/m^3)
+  real(r_kind), parameter :: rhoh = 9.17e2_r_kind  ! density of of hail (Lin et al. 1983) (kg/m^3)
+
+  real(r_kind), parameter :: rewfac = one
+  real(r_kind), parameter :: reifac = one
+
+  real(r_kind), parameter :: n0w_sig = 1.2_r_kind ! intercept parameter (significand) of cloud water (Lin et al. 1983) (1/m^4) (Martin et al. 1994)
+  real(r_kind), parameter :: n0i_sig = one ! intercept parameter (significand) of cloud ice (Lin et al. 1983) (1/m^4) (McFarquhar et al. 2015)
+  real(r_kind), parameter :: n0r_sig = 8.0_r_kind ! intercept parameter (significand) of rain (Lin et al. 1983) (1/m^4) (Marshall and Palmer 1948)
+  real(r_kind), parameter :: n0s_sig = 3.0_r_kind ! intercept parameter (significand) of snow (Lin et al. 1983) (1/m^4) (Gunn and Marshall 1958)
+  real(r_kind), parameter :: n0g_sig = 4.0_r_kind ! intercept parameter (significand) of graupel (Rutledge and Hobbs 1984) (1/m^4) (Houze et al. 1979)
+  real(r_kind), parameter :: n0h_sig = 4.0_r_kind ! intercept parameter (significand) of hail (Lin et al. 1983) (1/m^4) (Federer and Waldvogel 1975)
+
+  real(r_kind), parameter :: n0w_exp = 66.0_r_kind ! intercept parameter (exponent) of cloud water (Lin et al. 1983) (1/m^4) (Martin et al. 1994)
+  real(r_kind), parameter :: n0i_exp = r10 ! intercept parameter (exponent) of cloud ice (Lin et al. 1983) (1/m^4) (McFarquhar et al. 2015)
+  real(r_kind), parameter :: n0r_exp = 6.0_r_kind ! intercept parameter (exponent) of rain (Lin et al.  1983) (1/m^4) (Marshall and Palmer 1948)
+  real(r_kind), parameter :: n0s_exp = 6.0_r_kind ! intercept parameter (exponent) of snow (Lin et al.  1983) (1/m^4) (Gunn and Marshall 1958)
+  real(r_kind), parameter :: n0g_exp = 6.0_r_kind ! intercept parameter (exponent) of graupel (Rutledge and Hobbs 1984) (1/m^4) (Houze et al. 1979)
+  real(r_kind), parameter :: n0h_exp = 4.0_r_kind ! intercept parameter (exponent) of hail (Lin et al.  1983) (1/m^4) (Federer and Waldvogel 1975)
+
+  real(r_kind), parameter :: muw = 11.0_r_kind ! shape parameter of cloud water in Gamma distribution (Martin et al. 1994)
+  real(r_kind), parameter :: mui = one ! shape parameter of cloud ice in Gamma distribution (McFarquhar et al. 2015)
+  real(r_kind), parameter :: mur = one ! shape parameter of rain in Gamma distribution (Marshall and Palmer 1948)
+  real(r_kind), parameter :: mus = one ! shape parameter of snow in Gamma distribution (Gunn and Marshall 1958)
+  real(r_kind), parameter :: mug = one ! shape parameter of graupel in Gamma distribution (Houze et al. 1979)
+  real(r_kind), parameter :: muh = one ! shape parameter of hail in Gamma distribution (Federer and Waldvogel 1975)
+
+  real(r_kind), parameter :: blinw = two ! "b" in Lin et al. (1983) for cloud water (Ikawa and Saito 1990)
+  real(r_kind), parameter :: blini = 0.41_r_kind ! "b" in Lin et al. (1983) for cloud ice (Ikawa and Saita 1990)
+  real(r_kind), parameter :: blinr = 0.8_r_kind ! "b" in Lin et al. (1983) for rain (Liu and Orville 1969)
+  real(r_kind), parameter :: blins = 0.25_r_kind ! "b" in Lin et al. (1983) for snow (straka 2009)
+  real(r_kind), parameter :: bling = 0.5_r_kind ! "b" in Lin et al. (1983), similar to b, but for graupel (Pruppacher and Klett 2010)
+  real(r_kind), parameter :: blinh = 0.5_r_kind ! "b" in Lin et al. (1983), similar to b, but for hail (Pruppacher and Klett 2010)
+  
+  real(r_double) :: edaw, edai, edar, edas, edag, edah
+  real(r_double) :: edbw, edbi, edbr, edbs, edbg, edbh
+  real(r_kind) :: dpg, rei_fac 
+
+  real(r_kind) :: retab(138) = (/ &
+        0.05000_r_kind, 0.05000_r_kind, 0.05000_r_kind, 0.05000_r_kind, 0.05000_r_kind, 0.05000_r_kind, &
+        0.05500_r_kind, 0.06000_r_kind, 0.07000_r_kind, 0.08000_r_kind, 0.09000_r_kind, 0.10000_r_kind, &
+        0.20000_r_kind, 0.30000_r_kind, 0.40000_r_kind, 0.50000_r_kind, 0.60000_r_kind, 0.70000_r_kind, &
+        0.80000_r_kind, 0.90000_r_kind, 1.00000_r_kind, 1.10000_r_kind, 1.20000_r_kind, 1.30000_r_kind, &
+        1.40000_r_kind, 1.50000_r_kind, 1.60000_r_kind, 1.80000_r_kind, 2.00000_r_kind, 2.20000_r_kind, &
+        2.40000_r_kind, 2.60000_r_kind, 2.80000_r_kind, 3.00000_r_kind, 3.20000_r_kind, 3.50000_r_kind, &
+        3.80000_r_kind, 4.10000_r_kind, 4.40000_r_kind, 4.70000_r_kind, 5.00000_r_kind, 5.30000_r_kind, &
+        5.60000_r_kind, 5.92779_r_kind, 6.26422_r_kind, 6.61973_r_kind, 6.99539_r_kind, 7.39234_r_kind, &
+        7.81177_r_kind, 8.25496_r_kind, 8.72323_r_kind, 9.21800_r_kind, 9.74075_r_kind, 10.2930_r_kind, &
+        10.8765_r_kind, 11.4929_r_kind, 12.1440_r_kind, 12.8317_r_kind, 13.5581_r_kind, 14.2319_r_kind, &
+        15.0351_r_kind, 15.8799_r_kind, 16.7674_r_kind, 17.6986_r_kind, 18.6744_r_kind, 19.6955_r_kind, &
+        20.7623_r_kind, 21.8757_r_kind, 23.0364_r_kind, 24.2452_r_kind, 25.5034_r_kind, 26.8125_r_kind, &
+        27.7895_r_kind, 28.6450_r_kind, 29.4167_r_kind, 30.1088_r_kind, 30.7306_r_kind, 31.2943_r_kind, &
+        31.8151_r_kind, 32.3077_r_kind, 32.7870_r_kind, 33.2657_r_kind, 33.7540_r_kind, 34.2601_r_kind, &
+        34.7892_r_kind, 35.3442_r_kind, 35.9255_r_kind, 36.5316_r_kind, 37.1602_r_kind, 37.8078_r_kind, &
+        38.4720_r_kind, 39.1508_r_kind, 39.8442_r_kind, 40.5552_r_kind, 41.2912_r_kind, 42.0635_r_kind, &
+        42.8876_r_kind, 43.7863_r_kind, 44.7853_r_kind, 45.9170_r_kind, 47.2165_r_kind, 48.7221_r_kind, &
+        50.4710_r_kind, 52.4980_r_kind, 54.8315_r_kind, 57.4898_r_kind, 60.4785_r_kind, 63.7898_r_kind, &
+        65.5604_r_kind, 71.2885_r_kind, 75.4113_r_kind, 79.7368_r_kind, 84.2351_r_kind, 88.8833_r_kind, &
+        93.6658_r_kind, 98.5739_r_kind, 103.603_r_kind, 108.752_r_kind, 114.025_r_kind, 119.424_r_kind, &
+        124.954_r_kind, 130.630_r_kind, 136.457_r_kind, 142.446_r_kind, 148.608_r_kind, 154.956_r_kind, &
+        161.503_r_kind, 168.262_r_kind, 175.248_r_kind, 182.473_r_kind, 189.952_r_kind, 197.699_r_kind, &
+        205.728_r_kind, 214.055_r_kind, 222.694_r_kind, 231.661_r_kind, 240.971_r_kind, 250.639_r_kind /)
+
+  integer(i_kind) :: LU1, LU2, LU3, LU4, LU5
+
+! Output file number
+  LU1=3000+mype
+  LU2=4000+mype
+  LU3=5000+mype
+  LU4=6000+mype
+  LU5=7000+mype
+
+  edaw = exp (- 1. / (muw + 3) * log (n0w_sig)) * (muw + 2) * exp (- n0w_exp / (muw + 3) * log (10.))
+  edai = exp (- 1. / (mui + 3) * log (n0i_sig)) * (mui + 2) * exp (- n0i_exp / (mui + 3) * log (10.))
+  edar = exp (- 1. / (mur + 3) * log (n0r_sig)) * (mur + 2) * exp (- n0r_exp / (mur + 3) * log (10.))
+  edas = exp (- 1. / (mus + 3) * log (n0s_sig)) * (mus + 2) * exp (- n0s_exp / (mus + 3) * log (10.))
+  edag = exp (- 1. / (mug + 3) * log (n0g_sig)) * (mug + 2) * exp (- n0g_exp / (mug + 3) * log (10.))
+  edah = exp (- 1. / (muh + 3) * log (n0h_sig)) * (muh + 2) * exp (- n0h_exp / (muh + 3) * log (10.))
+
+  edbw = exp (1. / (muw + 3) * log (pi * rhow * gamma (muw + 3)))
+  edbi = exp (1. / (mui + 3) * log (pi * rhoi * gamma (mui + 3)))
+  edbr = exp (1. / (mur + 3) * log (pi * rhor * gamma (mur + 3)))
+  edbs = exp (1. / (mus + 3) * log (pi * rhos * gamma (mus + 3)))
+  edbg = exp (1. / (mug + 3) * log (pi * rhog * gamma (mug + 3)))
+  edbh = exp (1. / (muh + 3) * log (pi * rhoh * gamma (muh + 3)))
+
+! here only need to distinguish land and sea
+  mask = min(max(float(lsm), zero), two)
+  do k = 1, nsig
+     do i = 1, n_clouds_fwd_wk
+        ii=jcloud(i)
+        if (trim(cloud_names(ii))== 'ql' ) then
+           ql = cloud(k,i)
+        else if (trim(cloud_names(ii))== 'qi' ) then
+           qi = cloud(k,i)
+        else if (trim(cloud_names(ii))== 'qr' ) then
+           qr = cloud(k,i)
+        else if (trim(cloud_names(ii))== 'qs' ) then
+           qs = cloud(k,i)
+        else if (trim(cloud_names(ii))== 'qg' ) then
+           qg = cloud(k,i)
+        end if
+     end do
+
+     qmw = ql
+     qmi = qi
+     qmr = qr
+     qms = qs
+     qmg = qg
+
+     cldf = cloud_fraction(k)
+
+     if (present (cnvw)) then
+        qmw = qmw + cnvw(k)
+     endif
+     if (present (cnvi)) then
+        qmi = qmi + cnvi(k)
+     endif
+     if (present (cnvc)) then
+        cldf = cnvc(k) + (1 - cnvc(k)) * cldf
+     endif
+     qmw = max(qmw, zero)
+     qmi = max(qmi, zero)
+     qmr = max(qmr, zero)
+     qms = max(qms, zero)
+     qmg = max(qmg, zero)
+     cldf = min(max(cldf, zero), one)
+
+     !dpg = dp(k) / grav
+     rho = plyr(k) / (rdgas * t(k) * (one + fv * q(k)))
+  
+     ! original 
+     ! lwc = qmw * dpg * r1000
+     lwc = qmw * rho * r1000
+     iwc = qmi * rho * r1000
+     rwc = qmr * rho * r1000
+     swc = qms * rho * r1000
+     gwc = qmg * rho * r1000
+
+     tc = t(k) - t0c
+
+     if (rewopt == 0) then
+        rew = five
+     else if (rewopt == 1) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud water (martin et al., 1994)
+        ! -----------------------------------------------------------------------
+   
+        ccnw = ccn_o * abs (mask - one) + ccn_l * (one - abs (mask - one))
+
+        if (qmw > qcmin) then
+            rew = exp (one / three * log ((three * qmw * rho) / (four * pi * rhow * ccnw))) &
+                   * 1.0e4_r_kind
+            rew = max (rewmin, min (rewmax, rew))
+        else
+            rew = rewmin
+        endif
+
+     else if (rewopt == 2) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud water (martin et al., 1994, gfdl revision)
+        ! -----------------------------------------------------------------------
+
+        ccnw = 1.077_r_kind * ccn_o * abs (mask - one) + 1.143_r_kind * &
+               ccn_l * (one - abs (mask - one))
+
+        if (qmw > qcmin) then
+            rew = exp (one / three * log ((three * qmw * rho) / (four * pi * rhow * ccnw))) * 1.0e4_r_kind
+            rew = max (rewmin, min (rewmax, rew))
+        else
+            rew = rewmin
+        endif
+
+     else if (rewopt == 3) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud water (kiehl et al., 1994)
+        ! -----------------------------------------------------------------------
+
+        if (qmw > qcmin) then
+            rew = 14.0_r_kind * abs (mask - one) + &
+                  (8.0_r_kind + (14.0_r_kind - 8.0_r_kind) * &
+                  min (one, max (zero, -tc / 30.0_r_kind))) * (one - abs (mask - one))
+            rew = rew + (14.0_r_kind - rew) * &
+                     min (one, max (zero, snowd / r1000))
+            rew = max (rewmin, min (rewmax, rew))
+        else
+            rew = rewmin
+        endif
+
+     else if (rewopt == 4) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud water derived from PSD
+        ! -----------------------------------------------------------------------
+
+        if (qmw > qcmin) then
+            call cal_ed(qmw, rho, blinw, muw, &
+                        eda = edaw, edb = edbw, ed = rew)
+            rew = rewfac * 0.5_r_kind * rew * 1.0e6_r_kind
+            rew = max (rewmin, min (rewmax, rew))
+        else
+            rew = rewmin
+        endif
+
+     end if
+     if (jiter == jiterstart .and. allsky_verbose) then
+        !write(LU1,*)rew, qmw, lwc, qmw*rho, mask
+        write(LU1,*)rew, qmw, lwc
+     end if
+
+     if (reiopt == 0) then
+        rei = five
+     else if (reiopt == 1) then
+
+       ! -----------------------------------------------------------------------
+       ! cloud ice (heymsfield and mcfarquhar, 1996)
+       ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+           rei_fac = log (r1000 * qmi * rho)
+           if (tc < -50.0_r_kind) then
+              rei = beta / 9.917 * exp (0.109 * rei_fac) * r1000
+           elseif (tc < -40.0_r_kind) then
+              rei = beta / 9.337 * exp (0.080 * rei_fac) * r1000
+           elseif (tc < -30.0_r_kind) then
+              rei = beta / 9.208_r_kind * exp (0.055 * rei_fac) * r1000
+           else
+              rei = beta / 9.387_r_kind * exp (0.031 * rei_fac) * r1000
+           endif
+           rei = max (reimin, min (reimax, rei))
+        else
+           rei = reimin
+        endif
+
+     else if (reiopt == 2) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice (donner et al., 1997)
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+           if (tc <= -55.0_r_kind) then
+              rei = 15.41627_r_kind
+           elseif (tc <= -50.0_r_kind) then
+              rei = 16.60895_r_kind
+           elseif (tc <= -45.0_r_kind) then
+              rei = 32.89967_r_kind
+           elseif (tc <= -40.0_r_kind) then
+              rei = 35.29989_r_kind
+           elseif (tc <= -35.0_r_kind) then
+              rei = 55.65818_r_kind
+           elseif (tc <= -30.0_r_kind) then
+              rei = 85.19071_r_kind
+           elseif (tc <= -25.0_r_kind) then
+              rei = 72.35392_r_kind
+           else
+              rei = 92.46298_r_kind
+           endif
+           rei = max (reimin, min (reimax, rei))
+        else
+           rei = reimin
+        endif
+
+     else if (reiopt == 3) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice (fu, 2007)
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+           rei = 47.05_r_kind + tc * (0.6624_r_kind + 0.001741_r_kind * tc)
+           rei = max (reimin, min (reimax, rei))
+        else
+           rei = reimin
+        endif
+
+     else if (reiopt == 4) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice (kristjansson et al., 2000)
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+           ind = min (max (int (t(k) - 136.0_r_kind), 44), 138 - 1)
+           cor = t(k) - int (t(k))
+           rei = retab (ind) * (one - cor) + retab (ind + 1) * cor
+           rei = max (reimin, min (reimax, rei))
+        else
+           rei = reimin
+        endif
+
+     else if (reiopt == 5) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice (wyser, 1998)
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+           bw = -2.0_r_kind + 1.e-3_r_kind * log10 (rho * qmi / 50.e-3_r_kind) * &
+                exp (1.5_r_kind * log (max (1.e-10_r_kind, - tc)))
+           rei = 377.4_r_kind + bw * (203.3_r_kind + bw * &
+                 (37.91_r_kind + 2.3696_r_kind * bw))
+           rei = max (reimin, min (reimax, rei))
+        else
+           rei = reimin
+        endif
+
+     else if (reiopt == 6) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice (Sun and Rikus 1999, Sun 2001)
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+            rei_fac = log (r1000 * qmi * rho)
+            rei = 45.8966_r_kind * exp (0.2214 * rei_fac) + &
+                0.7957_r_kind * exp (0.2535_r_kind * rei_fac) * (tc + 190.0_r_kind)
+            rei = (1.2351_r_kind + 0.0105_r_kind * tc) * rei
+            rei = max (reimin, min (reimax, rei))
+        else
+            rei = reimin
+        endif
+
+     else if (reiopt == 7) then
+
+        ! -----------------------------------------------------------------------
+        ! cloud ice derived from PSD
+        ! -----------------------------------------------------------------------
+
+        if (qmi > qcmin) then
+            call cal_ed(qmi, rho, blini, mui, &
+                        eda = edai, edb = edbi, ed = rei)
+            rei = reifac * 0.5 * rei * 1.0e6_r_kind
+            rei = max (reimin, min (reimax, rei))
+        else
+            rei = reimin
+        endif
+
+     endif
+     if (jiter == jiterstart .and. allsky_verbose) then
+        write(LU2,*)rei, qmi, iwc
+     end if
+
+     ! -----------------------------------------------------------------------
+     ! rain (lin et al., 1983)
+     ! -----------------------------------------------------------------------
+
+     if (qmr > qcmin) then
+        call cal_ed(qmr, rho, blinr, mur, &
+                    eda = edar, edb = edbr, ed = rer)
+        rer = 0.5 * rer * 1.0e6_r_kind
+        rer = max (rermin, min (rermax, rer))
+     else
+        rer = rermin
+     endif
+     if (jiter == jiterstart .and. allsky_verbose) then
+        write(LU3,*)rer, qmr, rwc
+     end if
+
+     ! -----------------------------------------------------------------------
+     ! snow (lin et al., 1983)
+     ! -----------------------------------------------------------------------
+
+     if (qms .gt. qcmin) then
+        call cal_ed(qms, rho, blins, mus, &
+                    eda = edas, edb = edbs, ed = res)
+        res = 0.5 * res * 1.0e6_r_kind
+        res = max (resmin, min (resmax, res))
+     else
+        res = resmin
+     endif
+     if (jiter == jiterstart .and. allsky_verbose) then
+        write(LU4,*)res, qms, swc
+     end if
+
+     ! -----------------------------------------------------------------------
+     ! graupel (lin et al., 1983)
+     ! -----------------------------------------------------------------------
+
+     if (qmg .gt. qcmin) then
+        call cal_ed(qmg, rho, bling, mug, &
+                    eda = edag, edb = edbg, ed = reg)
+        reg = 0.5 * reg * 1.0e6_r_kind
+        reg = max (regmin, min (regmax, reg))
+     else
+        reg = regmin
+     endif
+     if (jiter == jiterstart .and. allsky_verbose) then
+        write(LU5,*)reg, qmg, gwc
+     end if
+
+     do i = 1, n_clouds_fwd_wk
+        ii=jcloud(i)
+        if (trim(cloud_names(ii))== 'ql' ) then
+           cloudefr(k,ii) = rew
+        else if (trim(cloud_names(ii))== 'qi' ) then
+           cloudefr(k,ii) = rei
+        else if (trim(cloud_names(ii))== 'qr' ) then
+           cloudefr(k,ii) = rer
+        else if (trim(cloud_names(ii))== 'qs' ) then
+           cloudefr(k,ii) = res
+        else if (trim(cloud_names(ii))== 'qg' ) then
+           cloudefr(k,ii) = reg
+        end if
+     end do
+
+  end do
+
+  end subroutine compute_effective_radius
+
+  subroutine cal_ed(q, den, blin, mu, eda, edb, ed)
+  
+    implicit none
+
+    ! -----------------------------------------------------------------------
+    ! input / output arguments
+    ! -----------------------------------------------------------------------
+
+    real(r_kind), intent (in) :: blin, mu
+
+    real(r_kind), intent (in) :: q, den
+
+    real(r_double), intent (in) :: eda, edb
+
+    real(r_kind), intent (out) :: ed
+
+    ed = eda / edb * exp (1. / (mu + 3) * log (6 * den * q))
+
+  end subroutine cal_ed
 
   end module crtm_interface
