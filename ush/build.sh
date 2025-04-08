@@ -28,8 +28,9 @@ module load "gsi_${MACHINE_ID}.${COMPILER}"
 module list
 set -x
 
-export CRTM_LIB="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a"
-export CRTM_INC="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/include"
+# Using self-compiled CRTM example
+#export CRTM_LIB="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a"
+#export CRTM_INC="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/include"
 
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
