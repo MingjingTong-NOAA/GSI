@@ -31,6 +31,8 @@ set -x
 # Using self-compiled CRTM example
 #export CRTM_LIB="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a"
 #export CRTM_INC="/gpfs/f6/bil-coastal-gfdl/scratch/Mingjing.Tong/CRTM/REL-2.3.0_emc/crtm_v2.3.0/include"
+#export CRTM_LIB="/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/crtm_v3.1.1/libcrtm.so"
+#export CRTM_INC="/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM/CRTMv3/crtm_v3.1.1/module/crtm/Intel/2021.5.0.20211109"
 
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
