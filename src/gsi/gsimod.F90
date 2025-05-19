@@ -76,7 +76,7 @@
   use radinfo, only: tzr_qc,tzr_bufrsave
   use radinfo, only: crtm_coeffs_path,optconv,crtm_overlap,rewopt,reiopt, &
                      allsky_gfdl,allsky_verbose,cloud_mask_option,mask_threshold, &
-                     hydrotable_format,hydrotype
+                     coeff_format,hydrotable_format,hydrotype
 
   use ozinfo, only: diag_ozone,init_oz
   use aeroinfo, only: diag_aero, init_aero, init_aero_vars, final_aero_vars
@@ -639,6 +639,7 @@
 !     oberror_tune - logical flag to tune oberror table  (true=on)
 !     perturb_fact -  magnitude factor for observation perturbation
 !     crtm_coeffs_path - path of directory w/ CRTM coeffs files
+!     coeff_format     - format of the CRTM coefficient files
 !     hydrotable_format - hydrotable format (binary or netcdf)
 !     hydrotype(1)  - hydrotype for cloud water
 !     hydrotype(2)  - hydrotype for cloud ice
@@ -806,7 +807,7 @@
        oneobtest,sfcmodel,dtbduv_on,ifact10,l_foto,offtime_data,&
        use_pbl,use_compress,nsig_ext,gpstop,commgpstop, commgpserrinf, &
        perturb_obs,perturb_fact,oberror_tune,preserve_restart_date, &
-       crtm_coeffs_path,hydrotable_format,hydrotype, &
+       crtm_coeffs_path,coeff_format,hydrotable_format,hydrotype, &
        crtm_overlap,rewopt,reiopt,allsky_gfdl,allsky_verbose, &
        cloud_mask_option,mask_threshold,berror_stats,tcp_posmatch,tcp_box, &
        newpc4pred,adp_anglebc,angord,passive_bc,use_edges,emiss_bc,upd_pred,reset_bad_radbc,&

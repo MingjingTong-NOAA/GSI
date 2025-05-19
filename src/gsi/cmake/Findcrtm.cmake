@@ -18,3 +18,7 @@ endif()
 set( CRTM_LIBRARY_PATH ${CRTM_LIBRARY} CACHE STRING "CRTM Library Location" )
 set( CRTM_INCLUDE_PATH ${CRTMINC} CACHE STRING "CRTM Include Location" )
 
+message("CRTM library path ${CRTM_LIBRARY_PATH}")
+message("CRTM include path ${CRTM_INCLUDE_PATH}")
+
+

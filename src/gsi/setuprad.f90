@@ -1111,7 +1111,7 @@ contains
         cldeff_fg=zero  
         if(microwave .and. sea) then 
            if(radmod%lcloud_fwd .and. (amsua .or. atms)) then
-              call ret_amsua(tb_obs,nchanl,tsavg5,zasat,clw_obs,ierrret,atms,scat)
+              call ret_amsua(tb_obs,nchanl,tsavg5,zasat,clw_obs,ierrret,scat)
               scatp=scat 
            else
               call calc_clw(nadir,tb_obs,tsim,ich,nchanl,no85GHz,amsua,ssmi,ssmis,amsre,atms, &
@@ -1321,7 +1321,7 @@ contains
            end do
 
            if(amsua.or.atms) then
-              call ret_amsua(tsim_bc,nchanl,tsavg5,zasat,clw_guess_retrieval,ierrret,atms)
+              call ret_amsua(tsim_bc,nchanl,tsavg5,zasat,clw_guess_retrieval,ierrret)
            else if(gmi) then
               call gmi_37pol_diff(tsim(6),tsim(7),tsim_clr(6),tsim_clr(7),clw_guess_retrieval,ierrret)
               call gmi_37pol_diff(tb_obs(6),tb_obs(7),tsim_clr(6),tsim_clr(7),clw_obs,ierrret)
@@ -1392,23 +1392,6 @@ contains
               call radiance_ex_obserr_gmi(radmod,nchanl,clw_obs,clw_guess_retrieval,tnoise,tnoise_cld,error0) 
            end if
         end if
-
-!       screen out observations with normalized (by symmetric error) FG
-!       departure > 2.5
-        if(radmod%lcloud_fwd .and. radmod%ex_obserr=='ex_obserr1' .and. &
-           eff_area .and. allsky_gfdl) then
-           do i=1,nchanl
-              if (abs(tbc(i)) > error0(i)*2.5_r_kind) then
-                 if (amsua .and. (i <= 6 .or. i == 15)) then
-                     varinv(i)=zero
-                     id_qc(i) = ifail_outside_symnorm
-                 else if (atms .and. (i <= 7 .or. i >= 16)) then
-                     varinv(i)=zero
-                     id_qc(i) = ifail_outside_symnorm
-                 end if
-              endif
-           end do
-        endif
 
         do i=1,nchanl
            mm=ich(i)
@@ -1699,13 +1682,13 @@ contains
               m=ich(i)
               if(radmod%lcloud_fwd .and. eff_area) then
                  if(radmod%rtype == 'amsua' .and. (i <=5 .or. i==15) ) then 
-                    if (radmod%lprecip .and. .not. allsky_gfdl) then
+                    if (radmod%lprecip) then
                        errf(i) = 2.5_r_kind*errf(i)
                     else
                        errf(i) = three*errf(i)
                     endif
                  else if(radmod%rtype == 'atms' .and. (i <= 6 .or. i>=16) ) then
-                    if (radmod%lprecip .and. .not. allsky_gfdl) then
+                    if (radmod%lprecip) then
                        errf(i) = min(2.5_r_kind*errf(i),10.0_r_kind)
                     else
                        errf(i) = min(three*errf(i),10.0_r_kind)

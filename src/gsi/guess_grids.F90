@@ -1812,11 +1812,12 @@ contains
 !
 ! !INTERFACE:
 !
-  subroutine add_rtm_layers(prsitmp,prsltmp,prsitmp_ext,prsltmp_ext,klevel)
+  subroutine add_rtm_layers(prsitmp,prsltmp,prsitmp_ext,prsltmp_ext,klevel, &
+                            hgtitmp,hgtitmp_ext)
 
 ! !USES:
 
-    use constants, only: half,ten,one_tenth
+    use constants, only: half,ten,one_tenth,r100,r1000
     use gridmod, only: nsig,msig,nlayers
     use crtm_module, only: toa_pressure
 
@@ -1827,9 +1828,11 @@ contains
 
     real(r_kind)   ,dimension(nsig+1),intent(in   ) :: prsitmp
     real(r_kind)   ,dimension(nsig)  ,intent(in   ) :: prsltmp
+    real(r_kind)   ,dimension(nsig+1), optional, intent(in) :: hgtitmp
 
     real(r_kind)   ,dimension(msig+1),intent(  out) :: prsitmp_ext
     real(r_kind)   ,dimension(msig)  ,intent(  out) :: prsltmp_ext
+    real(r_kind)   ,dimension(msig+1), optional, intent(out) :: hgtitmp_ext
 
 
 ! !DESCRIPTION:  Add pressure layers for use in RTM
@@ -1851,11 +1854,14 @@ contains
 
 !   Declare local variables
     integer(i_kind) k,kk,l
-    real(r_kind) dprs,toa_prs_kpa
+    real(r_kind) dprs,toa_prs_kpa,toa_hgt_m,dhgt
 
 !   Convert toa_pressure to kPa
 !   ---------------------------
     toa_prs_kpa = toa_pressure*one_tenth
+!   geoptential height is used to compute hydrometeor water desity, which
+!   doesn't have to be accurate near toa, because there is no hydrometer there
+    toa_hgt_m = r100*r1000
 
 !   Check if model top pressure above rtm top pressure, where prsitmp
 !   is in kPa and toa_pressure is in hPa.
@@ -1873,17 +1879,22 @@ contains
           kk = kk + 1
           prsltmp_ext(kk) = prsltmp(k)
           prsitmp_ext(kk) = prsitmp(k)
+          if (present(hgtitmp)) hgtitmp_ext(kk) = hgtitmp(k)
           klevel(kk) = k
        else
           if (k/=nsig) then
              dprs = (prsitmp(k+1)-prsitmp(k))/nlayers(k)
+             if (present(hgtitmp)) dhgt = (hgtitmp(k+1)-hgtitmp(k))/nlayers(k)
           else
              dprs = (toa_prs_kpa -prsitmp(k))/nlayers(k)
+             if (present(hgtitmp)) dhgt = (toa_hgt_m - hgtitmp(k))/nlayers(k)
           end if
           prsitmp_ext(kk+1) = prsitmp(k)
+          if (present(hgtitmp)) hgtitmp_ext(kk+1) = hgtitmp(k)
           do l=1,nlayers(k)
              kk=kk + 1
              prsitmp_ext(kk+1) = prsitmp(k) + dprs*l
+             if (present(hgtitmp)) hgtitmp_ext(kk+1) = hgtitmp(k) + dhgt*l
              prsltmp_ext(kk) = half*(prsitmp_ext(kk+1)+prsitmp_ext(kk))
              klevel(kk) = k
           end do
@@ -1892,6 +1903,7 @@ contains
 
 !   Set top of atmosphere pressure
     prsitmp_ext(msig+1) = toa_prs_kpa
+    if (present(hgtitmp)) hgtitmp_ext(msig+1) = toa_hgt_m
 
   end subroutine add_rtm_layers
 
