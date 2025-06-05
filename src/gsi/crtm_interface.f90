@@ -323,7 +323,7 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
   use crtm_module, only: mass_mixing_ratio_units,co2_id,o3_id,crtm_init, &
       crtm_channelinfo_subset, crtm_channelinfo_n_channels, toa_pressure,max_n_layers, &
       volume_mixing_ratio_units,h2o_id,ch4_id,n2o_id,co_id
-  use radinfo, only: crtm_coeffs_path
+  use radinfo, only: crtm_coeffs_path,hydrotable_format
   use radinfo, only: radjacindxs,radjacnames,jpch_rad,nusis,nuchan
   use aeroinfo, only: aerojacindxs
   use gridmod, only: fv3_full_hydro
@@ -360,6 +360,7 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
   integer(i_kind) :: n_absorbers
   logical quiet
   logical print_verbose
+  character(len=50) :: CloudCoeff_Format, CloudCoeff_File
 
   use_gfdl_qsat=.false.
   print_verbose=.false.
@@ -467,6 +468,13 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
     cld_sea_only_wk = radmod%cld_sea_only
     Load_CloudCoeff = .true.
     lprecip_wk = radmod%lprecip .or. fv3_full_hydro
+    if (trim(hydrotable_format) == 'netcdf') then
+       CloudCoeff_Format = 'netCDF'
+       CloudCoeff_File = 'CloudCoeff.nc'
+    else
+       CloudCoeff_Format = 'Binary'
+       CloudCoeff_File = 'CloudCoeff.bin'
+    endif
  else
     n_actual_clouds_wk = 0
     n_clouds_fwd_wk = 0
@@ -595,6 +603,9 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
 !       AerosolCoeff_Format=AerosolCoeff_Format, &
 !Aero>
        Load_CloudCoeff=Load_CloudCoeff,Load_AerosolCoeff=Load_AerosolCoeff, &
+! CloudCoeff_Format for CRTM 2.4 and above
+!       CloudCoeff_Format=trim(CloudCoeff_Format), &
+!       CloudCoeff_File=trim(CloudCoeff_File), &
        File_Path = crtm_coeffs_path,quiet=quiet )
  else
 
@@ -606,7 +617,10 @@ subroutine init_crtm(init_pass,mype_diaghdr,mype,nchanl,nreal,isis,obstype,radmo
 !       Aerosol_Model=Aerosol_Model,AerosolCoeff_File=AerosolCoeff_File, &
 !       AerosolCoeff_Format=AerosolCoeff_Format, &
 !Aero>
-       Load_CloudCoeff=Load_CloudCoeff,Load_AerosolCoeff=Load_AerosolCoeff,&
+       Load_CloudCoeff=Load_CloudCoeff,Load_AerosolCoeff=Load_AerosolCoeff, &
+! CloudCoeff_Format for CRTM 2.4 and above
+!       CloudCoeff_Format=trim(CloudCoeff_Format), &
+!       CloudCoeff_File=trim(CloudCoeff_File), &
        quiet=quiet)
  endif
  if (error_status /= success) then
@@ -1000,11 +1014,13 @@ subroutine destroy_crtm
   return
 end subroutine destroy_crtm
 subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
-                   h,q,qs,clw_guess,ciw_guess,rain_guess,snow_guess,prsl,prsi, &
+                   h,q,qs,clw_guess,ciw_guess,rain_guess,snow_guess, &
+                   graupel_guess,prsl,prsi, &
                    trop5,tzbgr,dtsavg,sfc_speed,&
                    tsim,emissivity,chan_level,ptau5,ts, &
                    emissivity_k,temp,wmix,jacobian,error_status,tsim_clr,tcc, & 
-                   tcwv,hwp_ratio,stability,layer_od,jacobian_aero)  
+                   tcwv,hwp_ratio,stability,layer_od,jacobian_aero, &
+                   pcp_mask,jacobian0,atprofile)  
 !$$$  subprogram documentation block
 !                .      .    .                                       .
 ! subprogram:    call_crtm   creates vertical profile of t,q,oz,p,zs,etc., 
@@ -1038,6 +1054,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 !                      use n_clouds_fwd_wk,n_aerosols_fwd_wk,cld_sea_only_wk, cld_sea_only_wk,cw_cv,etc
 !   2019-03-22  Wei/Martin - added VIIRS AOD obs in addition to MODIS AOD obs
 !   2020-05-24  H.Wang  - add interface (subroutine set_crtm_aerosol_fv3_cmaq_regional) for regional FV3-CMAQ. 
+!   2025-01-11  j.jin   - correct tcwv.
 !
 !   input argument list:
 !     obstype      - type of observations for which to get profile
@@ -1069,6 +1086,15 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 !     layer_od     - layer optical depth
 !     jacobian_aero- nsigaerojac level jacobians for use in intaod
 !     tsim_clr     - option to output simulated brightness temperatures for clear sky                  
+!     tcc          - total cloud cover
+!     pcp_mask     - option to output pcp_mask
+!     jacobian0    - jacobian on pressure level
+!     atprofile    - atmospheric profile on pressure level
+!     clw_guess    - cloud liquid water path
+!     ciw_guess    - cloud ice water path
+!     rain_guess   - rain water path
+!     snow_guess   - snow water path
+!     graupel_guess - graupel water path
 !
 ! attributes:
 !   language: f90
@@ -1080,6 +1106,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   use mpimod, only: mype
   use radinfo, only: ifactq
   use radinfo, only: nsigradjac
+  use radinfo, only: cloud_mask_option, mask_threshold, allsky_verbose
   use gsi_nstcouplermod, only: nst_gsi
   use guess_grids, only: ges_tsen,&
       ges_prsl,ges_prsi,ges_qsat,tropprs,dsfct,add_rtm_layers, &
@@ -1129,6 +1156,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind),dimension(nsig,nchanl)   ,intent(  out) :: temp,ptau5,wmix
   real(r_kind),dimension(nsigradjac,nchanl),intent(out):: jacobian
   real(r_kind)                          ,intent(  out) :: clw_guess,ciw_guess,rain_guess,snow_guess
+  real(r_kind)                          ,intent(  out) :: graupel_guess
   real(r_kind),dimension(nchanl)        ,intent(  out), optional  :: tsim_clr      
   real(r_kind),dimension(nchanl)        ,intent(  out), optional  :: tcc       
   real(r_kind)                          ,intent(  out), optional  :: tcwv              
@@ -1136,6 +1164,9 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   real(r_kind)                          ,intent(  out), optional  :: stability       
   real(r_kind),dimension(nsigaerojac,nchanl),intent(out),optional :: jacobian_aero
   real(r_kind),dimension(nsig,nchanl)   ,intent(  out)  ,optional :: layer_od
+  logical                               ,intent(  out)  ,optional :: pcp_mask
+  real(4),dimension(msig,10)            ,intent(  out)  ,optional :: atprofile
+  real(4),dimension(msig*8,nchanl)      ,intent(  out)  ,optional :: jacobian0
 
 ! Declare local parameters
   character(len=*),parameter::myname_=myname//'*call_crtm'
@@ -1161,7 +1192,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   integer(i_kind):: iqs,iozs,icfs
   integer(i_kind):: inis,inrs   
   integer(i_kind):: error_status_clr
-  integer(i_kind):: idx700,dprs,dprs_min  
+  integer(i_kind):: idx700
   integer(i_kind),dimension(8)::obs_time,anal_time
   integer(i_kind),dimension(msig) :: klevel
 ! ****************************** 
@@ -1170,6 +1201,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 ! ******************************
   integer(i_kind):: lai_type
 
+  real(r_kind):: dprs,dprs_min  
   real(r_kind):: wind10,wind10_direction,windratio,windangle 
   real(r_kind):: w00,w01,w10,w11,kgkg_kgm2,f10,panglr,dx,dy
   real(r_kind):: delx,dely,delx1,dely1,dtsig,dtsigp,dtsfc,dtsfcp,dtaer,dtaerp
@@ -1233,6 +1265,8 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   if (present(hwp_ratio)) hwp_ratio=zero  
   if (present(tcwv)) tcwv=zero           
   if (present(tcc)) tcc=zero           
+  if (present(jacobian0)) jacobian0=zero
+  if (present(atprofile)) atprofile=zero
 
   if (n_clouds_fwd_wk>0) then
      cloud = zero
@@ -2053,6 +2087,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
   ciw_guess = zero
   rain_guess = zero
   snow_guess = zero
+  graupel_guess = zero
 
   if (n_actual_aerosols_wk>0) then
      do k = 1, nsig
@@ -2077,11 +2112,17 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
      kk2 = klevel(kk)
      atmosphere(1)%temperature(k) = h(kk2)
      atmosphere(1)%absorber(k,1)  = q(kk2)*c3(kk2)
+     if(present(atprofile))then
+        atprofile(k,1)=atmosphere(1)%pressure(k)
+        atprofile(k,2)=atmosphere(1)%temperature(k)
+        atprofile(k,3)=atmosphere(1)%absorber(k,1)
+     end if
      if(iozs==0) then
         atmosphere(1)%absorber(k,2)  = poz(kk2)
      else
         atmosphere(1)%absorber(k,2)  = O3_ID
      endif
+     if(present(atprofile)) atprofile(k,4)=atmosphere(1)%absorber(k,2)
      if (n_ghg > 0) then
         do ig=1,n_ghg
            j=min_n_absorbers+ ig
@@ -2120,6 +2161,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               ciw_guess = ciw_guess +  cloud_cont(k,2)
               if(n_clouds_fwd_wk > 2) rain_guess = rain_guess +  cloud_cont(k,3)
               if(n_clouds_fwd_wk > 3) snow_guess = snow_guess +  cloud_cont(k,4)
+              if(n_clouds_fwd_wk > 4) graupel_guess = graupel_guess + cloud_cont(k,5)
 
               do ii=1,n_clouds_fwd_wk
                  if (ii==1 .and. atmosphere(1)%temperature(k)-t0c>-20.0_r_kind) &
@@ -2151,7 +2193,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               end do
  
               if (cloud_cont(k,1) >= 1.0e-6_r_kind) clw_guess = clw_guess +  cloud_cont(k,1)        
-              if (present(tcwv)) tcwv = tcwv + (atmosphere(1)%absorber(k,1)*0.001_r_kind)*c6(k)
+              if (present(tcwv)) tcwv = tcwv + q(kk2)*c6(k)
               do ii=1,n_clouds_fwd_wk
                  if (cloud_cont(k,ii) >= 1.0e-6_r_kind) hwp_guess(ii) = hwp_guess(ii) +  cloud_cont(k,ii)        
               enddo
@@ -2179,6 +2221,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                      cloud_cont(k,ii)=max(1.001_r_kind*1.0E-6_r_kind, cloud_cont(k,ii))
                      cloud_efr(k,ii)=max(5.001_r_kind, cloud_efr(k,ii))
                  endif
+                 if (trim(cloud_names_fwd(ii))=='ql') clw_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qi') ciw_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qr') rain_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qs') snow_guess=hwp_guess(ii)
+                 if (trim(cloud_names_fwd(ii))=='qg') graupel_guess=hwp_guess(ii)
               end do
 !             In CRTM, if cloud fraction of the layer < 1.0E-12, set cloud content and
 !             effective radius of all hydrometer types in that layer to zero
@@ -2191,6 +2238,7 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
               end do
            end if
         endif
+        if(present(atprofile)) atprofile(k,5)=atmosphere(1)%cloud_fraction(k)
      endif
   
 !    Add in a drop-off to absorber amount in the stratosphere to be in more
@@ -2241,6 +2289,19 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
 
 ! Call CRTM K Matrix model
 
+  if (present(pcp_mask)) then
+     if (cloud_mask_option == 0) then
+        pcp_mask=(rain_guess > mask_threshold .or. &
+                  snow_guess > mask_threshold .or. &
+                  graupel_guess > mask_threshold )
+     else
+        pcp_mask=(rain_guess > mask_threshold .or. &
+                  snow_guess > mask_threshold .or. &
+                  graupel_guess > mask_threshold .or. &
+                  clw_guess > mask_threshold .or. &
+                  ciw_guess > mask_threshold )
+     end if
+  end if
 
   error_status = 0
   if ( trim(obstype) /= 'modis_aod' .and. trim(obstype) /= 'viirs_aod' ) then
@@ -2391,6 +2452,11 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
           omix(kk,i) = omix(kk,i) + atmosphere_k(i,1)%absorber(k,2)
           total_od   = total_od + rtsolution(i,1)%layer_optical_depth(k)
           ptau5(kk,i) = exp(-min(limit_exp,total_od*secant_term))
+          if (present(jacobian0)) then
+              jacobian0(k,i)=atmosphere_k(i,1)%temperature(k)
+              jacobian0(msig+k,i)=atmosphere_k(i,1)%absorber(k,1)
+              jacobian0(2*msig+k,i)=atmosphere_k(i,1)%absorber(k,2)
+          end if
        end do
 
 !  Load jacobian array
@@ -2439,6 +2505,12 @@ subroutine call_crtm(obstype,obstime,data_s,nchanl,nreal,ich, &
                    end do
                    do k=1,msig
                       kk = klevel(msig-k+1)
+                      if(present(jacobian0))then
+                         jacobian0(msig*(2+ii)+k,i)=atmosphere_k(i,1)%cloud(ii)%water_content(k)
+                      end if
+                      if(present(atprofile))then
+                         atprofile(k,5+ii)=atmosphere(1)%cloud(ii)%water_content(k)
+                      end if
                       cwj(kk) = cwj(kk) + atmosphere_k(i,1)%cloud(ii)%water_content(k)*c6(k)
                    end do
                    do k=1,nsig

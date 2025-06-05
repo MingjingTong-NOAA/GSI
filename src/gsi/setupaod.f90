@@ -187,7 +187,8 @@ subroutine setupaod(obsLL,odiagLL,lunin,mype,nchanl,nreal,nobs,&
   real(r_kind),dimension(nsigradjac,nchanl):: jacobian
   real(r_kind),dimension(nsigaerojac,nchanl):: jacobian_aero
   real(r_kind),dimension(nsig,nchanl):: layer_od
-  real(r_kind) :: clw_guess, tzbgr, sfc_speed,ciw_guess,rain_guess,snow_guess
+  real(r_kind) :: clw_guess, tzbgr, sfc_speed,ciw_guess
+  real(r_kind) :: rain_guess,snow_guess,graupel_guess
 
   type(obsLList),pointer,dimension(:):: aerohead
   aerohead => obsLL(:)
@@ -408,7 +409,8 @@ subroutine setupaod(obsLL,odiagLL,lunin,mype,nchanl,nreal,nobs,&
  
 !       Interpolate model fields to observation location, call crtm and create jacobians
         call call_crtm(obstype,dtime,data_s(:,n),nchanl,nreal,ich, &
-             tvp,qvp,qsat,clw_guess,ciw_guess,rain_guess,snow_guess,prsltmp,prsitmp, &
+             tvp,qvp,qsat,clw_guess,ciw_guess,rain_guess,snow_guess, &
+             graupel_guess,prsltmp,prsitmp, &
              trop5,tzbgr,dtsavg,sfc_speed, &
              tsim,emissivity,chan_level,ptau5,ts,emissivity_k, &
              temp,wmix,jacobian,error_status,layer_od=layer_od,jacobian_aero=jacobian_aero)

@@ -129,9 +129,11 @@ contains
     use gsi_bundlemod, only: gsi_bundledestroy
     use general_sub2grid_mod, only: sub2grid_info,general_sub2grid_create_info,general_sub2grid_destroy_info
     use mpimod, only: npe,mype
-    use cloud_efr_mod, only: cloud_calc_gfs,set_cloud_lower_bound
+    use cloud_efr_mod, only: cloud_calc_gfs
+    use jfunc, only: cnvw_option
     use jfunc, only: hofx_2m_sfcfile
     use gridmod, only: fv3_full_hydro
+    use ncepnems_io, only: imp_physics
 
     implicit none
 
@@ -161,6 +163,8 @@ contains
     real(r_kind),pointer,dimension(:,:,:):: ges_cf_it  => NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_ni_it  => NULL()
     real(r_kind),pointer,dimension(:,:,:):: ges_nr_it  => NULL()
+    real(r_kind),pointer,dimension(:,:,:):: ges_cnvw_it =>NULL()
+    real(r_kind),pointer,dimension(:,:,:):: ges_cnvc_it =>NULL()
     type(sub2grid_info) :: grd_t
     logical regional
     logical:: l_cld_derived,zflag,inithead
@@ -172,11 +176,7 @@ contains
     integer(i_kind),parameter :: n3d=16
     character(len=4), parameter :: vars2d(n2d) = (/ 'z   ', 'ps  ' /)
     character(len=4), parameter :: vars2d_with2m(n2d_2m) = (/ 'z   ', 'ps  ','t2m ','q2m ' /)
-    ! character(len=4), parameter :: vars3d(n3d) = (/ 'u   ', 'v   ', &
-    !                                                 'vor ', 'div ', &
-    !                                                 'tv  ', 'q   ', &
-    !                                                 'cw  ', 'oz  ' /)
-    character(len=4), parameter :: vars3d(n3d) = (/ 'u   ', 'v   ', &
+    character(len=4), parameter :: vars3d_tmp(n3d) = (/ 'u   ', 'v   ', &
                                                     'vor ', 'div ', &
                                                     'tv  ', 'q   ', &
                                                     'cw  ', 'oz  ', &
@@ -184,12 +184,28 @@ contains
                                                     'qr  ', 'qs  ', &
                                                     'qg  ', 'ni  ', &
                                                     'nr  ', 'cf  ' /)
+    character(len=4), parameter :: vars3d_gmp(n3d) = (/ 'u   ', 'v   ', &
+                                                    'vor ', 'div ', &
+                                                    'tv  ', 'q   ', &
+                                                    'cw  ', 'oz  ', &
+                                                    'ql  ', 'qi  ', &
+                                                    'qr  ', 'qs  ', &
+                                                    'qg  ', 'cnvw', &
+                                                    'cnvc', 'cf  ' /)
 
     real(r_kind),pointer,dimension(:,:):: ptr2d   =>NULL()
     real(r_kind),pointer,dimension(:,:,:):: ptr3d =>NULL()
+    character(len=4) :: vars3d(n3d)
 
     regional=.false.
     inner_vars=1
+    if (imp_physics == 11) then
+       vars3d=vars3d_gmp
+    else
+       vars3d=vars3d_tmp
+    end if
+
+    if (mype==0) print *,'vars3d ', vars3d
 
     num_fields=min(n3d*grd_a%nsig+2,npe)
 !  Create temporary communication information fore read routines
@@ -247,6 +263,9 @@ contains
              do j=1, lon2
                 do i=1, lat2
                    ! set lower bound to hydrometeors
+                   if (cnvw_option .and. associated(ges_cnvw_it)) then
+                      ges_ql_it(i,j,k) = ges_ql_it(i,j,k) + ges_cnvw_it(i,j,k)
+                   end if
                    if (associated(ges_ql_it)) ges_ql_it(i,j,k) = max(qcmin,ges_ql_it(i,j,k))
                    if (associated(ges_qi_it)) ges_qi_it(i,j,k) = max(qcmin,ges_qi_it(i,j,k))
                    if (associated(ges_qr_it)) ges_qr_it(i,j,k) = max(qcmin,ges_qr_it(i,j,k))
@@ -255,6 +274,8 @@ contains
                    if (associated(ges_ni_it)) ges_ni_it(i,j,k) = max(qcmin,ges_ni_it(i,j,k))
                    if (associated(ges_nr_it)) ges_nr_it(i,j,k) = max(qcmin,ges_nr_it(i,j,k))
                    if (associated(ges_cf_it)) ges_cf_it(i,j,k) = min(max(zero,ges_cf_it(i,j,k)),one)
+                   if (associated(ges_cnvw_it)) ges_cnvw_it(i,j,k) = max(qcmin,ges_cnvw_it(i,j,k))
+                   if (associated(ges_cnvc_it)) ges_cnvc_it(i,j,k) = min(max(zero,ges_cnvc_it(i,j,k)),one)
                 enddo
              enddo
           enddo
@@ -262,8 +283,6 @@ contains
           l_cld_derived = associated(ges_cwmr_it).and.&
                           associated(ges_q_it)   .and.&
                           associated(ges_ql_it)  .and.&
-                          associated(ges_ni_it)  .and.&
-                          associated(ges_nr_it)  .and.&
                           associated(ges_qi_it)  .and.& 
                           associated(ges_tv_it)
 !         call set_cloud_lower_bound(ges_cwmr_it)
@@ -351,15 +370,17 @@ contains
        call gsi_bundlegetpointer (gsi_metguess_bundle(it),'ql',ges_ql_it,istatus)
        if(istatus==0) ges_ql_it = ptr3d
     endif
-    call gsi_bundlegetpointer (atm_bundle,'ni',ptr3d,istatus)
-    if (istatus==0) then
-       call gsi_bundlegetpointer (gsi_metguess_bundle(it),'ni',ges_ni_it,istatus)
-       if(istatus==0) ges_ni_it = ptr3d
-    endif
-    call gsi_bundlegetpointer (atm_bundle,'nr',ptr3d,istatus)
-    if (istatus==0) then
-       call gsi_bundlegetpointer (gsi_metguess_bundle(it),'nr',ges_nr_it,istatus)
-       if(istatus==0) ges_nr_it = ptr3d
+    if (imp_physics == 8) then
+       call gsi_bundlegetpointer (atm_bundle,'ni',ptr3d,istatus)
+       if (istatus==0) then
+          call gsi_bundlegetpointer (gsi_metguess_bundle(it),'ni',ges_ni_it,istatus)
+          if(istatus==0) ges_ni_it = ptr3d
+       endif
+       call gsi_bundlegetpointer (atm_bundle,'nr',ptr3d,istatus)
+       if (istatus==0) then
+          call gsi_bundlegetpointer (gsi_metguess_bundle(it),'nr',ges_nr_it,istatus)
+          if(istatus==0) ges_nr_it = ptr3d
+       endif
     endif
     call gsi_bundlegetpointer (atm_bundle,'qi',ptr3d,istatus)
     if (istatus==0) then
@@ -385,6 +406,18 @@ contains
     if (istatus==0) then
        call gsi_bundlegetpointer (gsi_metguess_bundle(it),'cf',ges_cf_it,istatus)
        if(istatus==0) ges_cf_it = ptr3d
+    endif
+    if(cnvw_option) then
+       call gsi_bundlegetpointer (atm_bundle,'cnvw',ptr3d,istatus)
+       if (istatus==0) then
+          call gsi_bundlegetpointer (gsi_metguess_bundle(it),'cnvw',ges_cnvw_it,istatus)
+          if(istatus==0) ges_cnvw_it = ptr3d
+       end if
+       call gsi_bundlegetpointer (atm_bundle,'cnvc',ptr3d,istatus)
+       if (istatus==0) then
+          call gsi_bundlegetpointer (gsi_metguess_bundle(it),'cnvc',ges_cnvc_it,istatus)
+          if(istatus==0) ges_cnvc_it = ptr3d
+       end if
     endif
   end subroutine set_guess_
 

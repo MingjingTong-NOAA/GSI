@@ -197,6 +197,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
   use mpimod, only: npe,mpi_comm_world,ierror,mpi_rtype
   use general_sub2grid_mod, only: sub2grid_info
   use ncepnems_io, only: imp_physics
+  use jfunc, only: cnvw_option
   implicit none
 
 ! !INPUT PARAMETERS:
@@ -212,9 +213,9 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
   real(r_kind),dimension(grd%lat2,grd%lon2),         intent(  out) :: g_ps
   real(r_kind),dimension(grd%lat2,grd%lon2),         intent(inout) :: g_z
   real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out) :: g_u,g_v,&
-       g_vor,g_div,g_q,g_oz,g_tv,g_ql,g_qi,g_qr,g_qs,g_qg,g_ni,g_nr
+       g_vor,g_div,g_q,g_oz,g_tv,g_ql,g_qi,g_qr,g_qs,g_qg
 
-  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_cf
+  real(r_kind),dimension(grd%lat2,grd%lon2,grd%nsig),intent(  out),optional :: g_ni,g_nr,g_cf
 
 
 ! !DESCRIPTION: Transfer contents of 2-d array global to 3-d subdomain array
@@ -232,6 +233,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
 ! !AUTHOR:
 !   treadon          org: np23                date: 2004-05-14
 !
+!   tong  g_ni and g_nr are place holder for g_cnvw, g_cnvc for GFDL MP
 !EOP
 !-------------------------------------------------------------------------
 
@@ -394,7 +396,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                g_qg(i,j,klev)=sub(ij,k)
             enddo
          enddo
-      elseif ( iflag(k) == 15 .and. imp_physics == 8) then
+      elseif ( iflag(k) == 15 .and. (imp_physics == 8 .or. cnvw_option) .and. present(g_ni)) then
          klev=ilev(k)
          ij=0
          do j=1,grd%lon2
@@ -403,7 +405,7 @@ subroutine general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                g_ni(i,j,klev)=sub(ij,k)
             enddo
          enddo
-      elseif ( iflag(k) == 16 .and. imp_physics == 8) then
+      elseif ( iflag(k) == 16 .and. (imp_physics == 8 .or. cnvw_option) .and. present(g_nr)) then
          klev=ilev(k)
          ij=0
          do j=1,grd%lon2
@@ -2828,6 +2830,7 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                           close_dataset, get_dim, read_vardata,get_idate_from_time_units
    use gfsreadmod, only: general_reload2, general_reload_sfc
    use ncepnems_io, only: imp_physics
+   use jfunc, only: cnvw_option
 
    implicit none
 
@@ -3058,8 +3061,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
        call gsi_bundlegetpointer(gfs_bundle,'qs',g_qs  ,ier);istatus1=istatus1+ier
        call gsi_bundlegetpointer(gfs_bundle,'qg',g_qg  ,ier);istatus1=istatus1+ier
     !  call gsi_bundlegetpointer(gfs_bundle,'cf',g_cf  ,ier);istatus1=istatus1+ier
-       call gsi_bundlegetpointer(gfs_bundle,'ni',g_ni  ,ier);istatus1=istatus1+ier
-       call gsi_bundlegetpointer(gfs_bundle,'nr',g_nr  ,ier);istatus1=istatus1+ier
+       if (imp_physics == 8) then
+         call gsi_bundlegetpointer(gfs_bundle,'ni',g_ni  ,ier);istatus1=istatus1+ier
+         call gsi_bundlegetpointer(gfs_bundle,'nr',g_nr  ,ier);istatus1=istatus1+ier
+       else if (cnvw_option) then
+         call gsi_bundlegetpointer(gfs_bundle,'cnvw',g_ni  ,ier);istatus1=istatus1+ier
+         call gsi_bundlegetpointer(gfs_bundle,'cnvc',g_nr  ,ier);istatus1=istatus1+ier
+       endif
        if ( istatus1 /= 0 ) then
           if ( mype == 0 ) then
              write(6,*) 'general_read_gfsatm_allhydro_nc: ERROR'
@@ -3121,8 +3129,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
          endif
       endif
       if ( icount == icm ) then
-         call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+         if (imp_physics == 8 .or. cnvw_option) then
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
               g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+         else
+            call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+              g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+         endif
       endif
    endif
 
@@ -3156,8 +3169,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
           endif
        endif
        if ( icount == icm ) then
-          call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+          if (imp_physics == 8 .or. cnvw_option) then
+             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+          else
+             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+               g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+          endif
        endif
 
        !   Thermodynamic variable:  s-->g transform, communicate to all tasks
@@ -3193,8 +3211,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        end do
 
@@ -3250,8 +3273,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                 deallocate(grid_vor)
              endif
              if ( icount == icm ) then
-                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                if (imp_physics == 8 .or. cnvw_option) then
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                      g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+                else
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                     g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+                endif
              endif
           end do
           do k=1,nlevs
@@ -3306,8 +3334,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                 deallocate(grid_div)
              endif
              if ( icount == icm ) then
-                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                if (imp_physics == 8 .or. cnvw_option) then
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                      g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+                else
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                     g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+                endif
              endif
 
           end do
@@ -3342,8 +3375,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                 endif
              endif
              if ( icount == icm ) then
-                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                if (imp_physics == 8 .or. cnvw_option) then
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                      g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+                else
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                     g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+                endif
              endif
 
              icount=icount+1
@@ -3373,8 +3411,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
                 endif
              endif
              if ( icount == icm ) then
-                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                if (imp_physics == 8 .or. cnvw_option) then
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                      g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+                else
+                   call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                     g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+                endif
              endif
           end do
        endif ! if ( uvflag )
@@ -3404,8 +3447,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        end do
       
@@ -3435,8 +3483,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        end do
 
@@ -3466,8 +3519,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
           endif
 
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        enddo ! do k=1,nlevs
 
@@ -3496,8 +3554,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        enddo ! do k=1,nlevs
 
@@ -3526,8 +3589,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        enddo ! do k=1,nlevs
 
@@ -3556,8 +3624,13 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm ) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        enddo ! do k=1,nlevs
 
@@ -3586,13 +3659,18 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              endif
           endif
           if ( icount == icm .or. k==nlevs) then
-             call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+             if (imp_physics == 8 .or. cnvw_option) then
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                   g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
+             else
+                call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
+                  g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag)
+             endif
           endif
        enddo ! do k=1,nlevs
 
-       ! Read fields specific to Thompson microphysics
-       if (imp_physics == 8) then
+       ! Read fields specific to Thompson microphysics or convective cloud
+       if (imp_physics == 8 .or. cnvw_option) then
           do k=1,nlevs
              icount=icount+1
              iflag(icount)=15
@@ -3650,7 +3728,7 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
              if ( icount == icm .or. k==nlevs) then
                 call general_reload2(grd,g_z,g_ps,g_tv,g_vor,g_div,g_u,g_v,g_q,g_oz, &
                      g_ql,g_qi,g_qr,g_qs,g_qg,icount,iflag,ilev,work,uvflag,vordivflag,g_ni,g_nr)
-                endif
+             endif
           enddo ! do k=1,nlevs
        endif ! imp_physics
 !       do k=1,nlevs

@@ -28,6 +28,20 @@ module load "gsi_${MACHINE_ID}.${COMPILER}"
 module list
 set -x
 
+# Using self-compiled CRTM example
+CRTM_VERSION="2.3"
+CRTM_PATH=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM
+CRTMPATH="$DIR_ROOT/../../../../CRTM"
+if [[ ${CRTM_VERSION} == "v3" ]]; then
+   CRTMVER="CRTMv3"
+elif [[ ${CRTM_VERSION} == "2.3" ]]; then
+   CRTMVER="REL-2.3.0_emc"
+fi
+if [[ ${CRTM_VERSION} != "2.4" ]]; then
+   export CRTM_LIB=${CRTMPATH}/${CRTMVER}/install/lib/libcrtm.a
+   export CRTM_INC=${CRTMPATH}/${CRTMVER}/install/include
+fi
+
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
 # Collect BUILD Options
@@ -48,7 +62,7 @@ mkdir -p $BUILD_DIR && cd $BUILD_DIR
 
 # Configure, build, install
 cmake $CMAKE_OPTS $DIR_ROOT
-make -j ${BUILD_JOBS:-8} VERBOSE=${BUILD_VERBOSE:-}
+make -j ${BUILD_JOBS:-8} VERBOSE=${BUILD_VERBOSE:-1}
 make install
 
 exit

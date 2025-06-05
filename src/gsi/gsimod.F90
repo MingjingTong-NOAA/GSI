@@ -74,7 +74,9 @@
                        ssmis_method,ssmis_precond,gmi_method,amsr2_method,bias_zero_start, &
                        reset_bad_radbc,cld_det_dec2bin,diag_version,lupdqc,lqcoef
   use radinfo, only: tzr_qc,tzr_bufrsave
-  use radinfo, only: crtm_coeffs_path,optconv
+  use radinfo, only: crtm_coeffs_path,optconv,hydrotable_format,hydrotype, &
+                     allsky_verbose,cloud_mask_option,mask_threshold
+
   use ozinfo, only: diag_ozone,init_oz
   use aeroinfo, only: diag_aero, init_aero, init_aero_vars, final_aero_vars
   use coinfo, only: diag_co,init_co
@@ -635,6 +637,13 @@
 !     oberror_tune - logical flag to tune oberror table  (true=on)
 !     perturb_fact -  magnitude factor for observation perturbation
 !     crtm_coeffs_path - path of directory w/ CRTM coeffs files
+!     hydrotable_format - hydrotable format (binary or netcdf)
+!     hydrotype(1)  - hydrotype for cloud water
+!     hydrotype(2)  - hydrotype for cloud ice
+!     hydrotype(3)  - hydrotype for rain
+!     hydrotype(4)  - hydrotype for snow
+!     hydrotype(5)  - hydrotype for graupel
+!     hydrotype(6)  - hydrotype for hail
 !     print_diag_pcg - logical turn on of printing of GMAO diagnostics in pcgsoi.f90
 !     preserve_restart_date - if true, then do not update regional restart file date.
 !     tsensible - option to use sensible temperature as the analysis variable. works
@@ -777,6 +786,8 @@
        use_pbl,use_compress,nsig_ext,gpstop,commgpstop, commgpserrinf, &
        perturb_obs,perturb_fact,oberror_tune,preserve_restart_date, &
        crtm_coeffs_path,berror_stats,tcp_posmatch,tcp_box, &
+       hydrotable_format,hydrotype, &
+       allsky_verbose,cloud_mask_option,mask_threshold, &
        newpc4pred,adp_anglebc,angord,passive_bc,use_edges,emiss_bc,upd_pred,reset_bad_radbc,&
        ssmis_method, ssmis_precond, gmi_method, amsr2_method, bias_zero_start, &
        ec_amv_qc, lobsdiagsave, lobsdiag_forenkf, &
