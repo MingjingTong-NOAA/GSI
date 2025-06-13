@@ -29,7 +29,7 @@ module list
 set -x
 
 # Using self-compiled CRTM example
-CRTM_VERSION="2.3"
+CRTM_VERSION="2.4"
 CRTM_PATH=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM
 CRTMPATH="$DIR_ROOT/../../../../CRTM"
 if [[ ${CRTM_VERSION} == "v3" ]]; then

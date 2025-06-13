@@ -1172,8 +1172,7 @@ contains
 
 !         check inew_rad again
           do j =1,jpch_rad
-             if ((inew_rad(j) .and. iuse_rad(j)>=0 .and. all(predx(:,j)==zero)) &
-                 .or. (iuse_rad(j)==4 .and. all(predx(:,:)==zero))) then
+             if (inew_rad(j) .and. iuse_rad(j)>=0 .and. iuse_rad(j)/=4 .and. all(predx(:,j)==zero)) then
                 iuse_rad(j)=-1
              end if
           end do
