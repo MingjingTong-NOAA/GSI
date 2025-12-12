@@ -2,23 +2,6 @@
 
 set -eux
 
-while getopts "r" option;
-do
- case $option in
-  r)
-   echo "Recieved -r flag, will recompile without clean"
-   export BUILD_CLEAN="NO"
-   ;;
-  :)
-   echo "option -$OPTARG needs an argument"
-   ;;
-  *)
-   echo "invalid option -$OPTARG, exiting..."
-   exit
-   ;;
- esac
-done
-
 # Get the root of the cloned GSI directory
 readonly DIR_ROOT=$(cd "$(dirname "$(readlink -f -n "${BASH_SOURCE[0]}" )" )/.." && pwd -P)
 
@@ -45,13 +28,22 @@ module load "gsi_${MACHINE_ID}.${COMPILER}"
 module list
 set -x
 
+# Using self-compiled CRTM example
+CRTM_VERSION="2.4"
+CRTM_PATH=/scratch2/GFDL/gfdlscr/Mingjing.Tong/CRTM
+CRTMPATH="$DIR_ROOT/../../../../CRTM"
+if [[ ${CRTM_VERSION} == "v3" ]]; then
+   CRTMVER="CRTMv3"
+elif [[ ${CRTM_VERSION} == "2.3" ]]; then
+   CRTMVER="REL-2.3.0_emc"
+fi
+if [[ ${CRTM_VERSION} != "2.4" ]]; then
+   export CRTM_LIB=${CRTMPATH}/${CRTMVER}/install/lib/libcrtm.a
+   export CRTM_INC=${CRTMPATH}/${CRTMVER}/install/include
+fi
+
 # Set CONTROLPATH variable to user develop installation
 CONTROLPATH="$DIR_ROOT/../develop/install/bin"
-CRTMPATH="$DIR_ROOT/../../../../CRTM"
-export CRTM_LIB=${CRTMPATH}/REL-2.3.0_emc/crtm_v2.3.0/lib/libcrtm.a
-export CRTM_INC=${CRTMPATH}/REL-2.3.0_emc/crtm_v2.3.0/include
-#export CRTM_LIB=${CRTMPATH}/CRTMv3/build/crtm_v3.1.0/lib64/libcrtm.a
-#export CRTM_INC=${CRTMPATH}/CRTMv3/build/crtm_v3.1.0/module/crtm/Intel/2021.9.0.20230302
 # Collect BUILD Options
 CMAKE_OPTS+=" -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 
@@ -65,10 +57,8 @@ CMAKE_OPTS+=" -DGSI_MODE=$GSI_MODE -DENKF_MODE=${ENKF_MODE}"
 [[ ${REGRESSION_TESTS} =~ [yYtT] ]] && CMAKE_OPTS+=" -DBUILD_REG_TESTING=ON -DCONTROLPATH=${CONTROLPATH:-}"
 
 # Re-use or create a new BUILD_DIR (Default: create new BUILD_DIR)
-if [[ ${BUILD_CLEAN:-"YES"} =~ [yYtT] ]] ; then
-   rm -rf $BUILD_DIR
-   mkdir -p $BUILD_DIR && cd $BUILD_DIR
-fi
+[[ ${BUILD_CLEAN:-"YES"} =~ [yYtT] ]] && rm -rf $BUILD_DIR
+mkdir -p $BUILD_DIR && cd $BUILD_DIR
 
 # Configure, build, install
 cmake $CMAKE_OPTS $DIR_ROOT

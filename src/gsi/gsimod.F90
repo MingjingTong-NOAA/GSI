@@ -74,9 +74,12 @@
                        ssmis_method,ssmis_precond,gmi_method,amsr2_method,bias_zero_start, &
                        reset_bad_radbc,cld_det_dec2bin,diag_version,lupdqc,lqcoef
   use radinfo, only: tzr_qc,tzr_bufrsave
-  use radinfo, only: crtm_coeffs_path,optconv,crtm_overlap,rewopt,reiopt, &
-                     allsky_gfdl,allsky_verbose,cloud_mask_option,mask_threshold, &
-                     hydrotable_format,hydrotype
+  use radinfo, only: crtm_coeffs_path,optconv,hydrotable_format,hydrotype
+  use radinfo, only: crtm_overlap,rewopt,reiopt,allsky_gfdl,allsky_verbose
+! CCH::
+  use radinfo, only: varbc_data_control, cld_cld_varbc_constraint, io_use_bc_clw_for_cloud_mismatch,&
+                     io_cld_pred_in_varbc, cld_varbc_chs, cld_pred_fn_varbc,&
+                     io_empirical_inflation, io_non_Gaussian_error, io_save_jacobian_cch, io_scatter_assim
 
   use ozinfo, only: diag_ozone,init_oz
   use aeroinfo, only: diag_aero, init_aero, init_aero_vars, final_aero_vars
@@ -95,9 +98,9 @@
   use qcmod, only: dfact,dfact1,create_qcvars,destroy_qcvars,&
       erradar_inflate,tdrerr_inflate,use_poq7,qc_satwnds,&
       init_qcvars,vadfile,noiqc,c_varqc,gps_jacqc,qc_noirjaco3,qc_noirjaco3_pole,&
-      buddycheck_t,buddydiag_save,njqc,vqc,nvqc,hub_norm,vadwnd_l2rw_qc, &
+      buddycheck_t,buddydiag_save,njqc,vqc,nvqc,hub_norm,vadwnd_l2rw_qc,sfcwndob_biasc,&
       pvis,pcldch,scale_cv,estvisoe,estcldchoe,vis_thres,cldch_thres,cao_check, &
-      cris_cads, iasi_cads, airs_cads
+      cris_cads, iasi_cads, iasing_cads, airs_cads
   use qcmod, only: troflg,lat_c,nrand
   use cads, only: M__Sensor,N__Num_Bands,N__GradChkInterval,N__Band_Size,N__Bands,N__Window_Width, &
       N__Window_Bounds,R__BT_Threshold,R__Grad_Threshold,R__Window_Grad_Threshold, L__Do_Quick_Exit, &
@@ -110,7 +113,7 @@
      factv,factl,factp,factg,factw10m,facthowv,factcldch,niter,niter_no_qc,biascor,&
      init_jfunc,qoption,cwoption,switch_on_derivatives,tendsflag,jiterstart,jiterend,R_option,&
      bcoption,diurnalbc,print_diag_pcg,tsensible,diag_precon,step_start,pseudo_q2,&
-     clip_supersaturation,cnvw_option,clip_hydrometeor,hofx_2m_sfcfile
+     clip_supersaturation,cnvw_option,hofx_2m_sfcfile, ignore_2mQM,clip_hydrometeor
   use state_vectors, only: init_anasv,final_anasv
   use control_vectors, only: init_anacv,final_anacv,nrf,nvars,nrf_3d,cvars3d,cvars2d,&
      nrf_var,lcalc_gfdl_cfrac,incvars_to_zero,incvars_zero_strat,incvars_efold 
@@ -187,7 +190,8 @@
                             cld_bld_coverage,cld_clr_coverage,&
                             i_cloud_q_innovation,i_ens_mean,DTsTmax,&
                             i_T_Q_adjust,l_saturate_bkCloud,l_rtma3d,i_precip_vertical_check, &
-                            corp_howv, hwllp_howv, corp_gust, hwllp_gust, oerr_gust
+                            corp_howv, hwllp_howv, corp_gust, hwllp_gust, oerr_gust, i_howv_mask, &
+                            i_sfcrough_fgs, corp_vis, hwllp_vis, i_gsd_terrain_match_mesonet
   use gsi_metguess_mod, only: gsi_metguess_init,gsi_metguess_final
   use gsi_chemguess_mod, only: gsi_chemguess_init,gsi_chemguess_final
   use tcv_mod, only: init_tcps_errvals,tcp_refps,tcp_width,tcp_ermin,tcp_ermax
@@ -510,6 +514,8 @@
 !  01-07-2022 Hu        Add fv3_io_layout_y to let fv3lam interface read/write subdomain restart
 !                       files. The fv3_io_layout_y needs to match fv3lam model
 !                       option io_layout(2).
+!  2022-04-15  pondeca  add "logical sfcwndob_biasc" for surface wind bias  correction
+!                       based on a modified Kalman-Bucy filter
 !  05-24-2022 H.Wang    Add PM2.5 and AOD DA for regional FV3-CMAQ (RRFS-CMAQ).
 !                       GSI will perform aerosol analysis when 
 !                           1. laeroana_fv3cmaq =  .true.
@@ -792,6 +798,9 @@
 !     NOTE:  for now, if in regional mode, then iguess=-1 is forced internally.
 !            add use of guess file later for regional mode.
 
+
+! CCH:: also modify the namelist for GSI
+
   namelist/setup/gencode,factqmin,factqmax,superfact,limitqobs,clip_supersaturation, &
        clip_hydrometeor,factql,factqi,factqr,factqs,factqg, &     
        factv,factl,factp,factg,factw10m,facthowv,factcldch,R_option,deltim,dtphys,&
@@ -806,9 +815,9 @@
        oneobtest,sfcmodel,dtbduv_on,ifact10,l_foto,offtime_data,&
        use_pbl,use_compress,nsig_ext,gpstop,commgpstop, commgpserrinf, &
        perturb_obs,perturb_fact,oberror_tune,preserve_restart_date, &
-       crtm_coeffs_path,hydrotable_format,hydrotype, &
+       crtm_coeffs_path,berror_stats,tcp_posmatch,tcp_box, &
+       hydrotable_format,hydrotype, &
        crtm_overlap,rewopt,reiopt,allsky_gfdl,allsky_verbose, &
-       cloud_mask_option,mask_threshold,berror_stats,tcp_posmatch,tcp_box, &
        newpc4pred,adp_anglebc,angord,passive_bc,use_edges,emiss_bc,upd_pred,reset_bad_radbc,&
        ssmis_method, ssmis_precond, gmi_method, amsr2_method, bias_zero_start, &
        ec_amv_qc, lobsdiagsave, lobsdiag_forenkf, &
@@ -836,7 +845,10 @@
        cao_check,lcalc_gfdl_cfrac,tau_fcst,efsoi_order,lupdqc,lqcoef,cnvw_option,l2rwthin,hurricane_radar,&
        l_reg_update_hydro_delz, l_obsprvdiag,&
        l_use_dbz_directDA, l_use_rw_columntilt, ta2tb, optconv, &
-       r_hgt_fed
+       r_hgt_fed, &
+       varbc_data_control, cld_cld_varbc_constraint, io_use_bc_clw_for_cloud_mismatch, &
+       io_cld_pred_in_varbc, cld_varbc_chs, cld_pred_fn_varbc, &
+       io_empirical_inflation, io_non_Gaussian_error, io_save_jacobian_cch, io_scatter_assim
 
 ! GRIDOPTS (grid setup variables,including regional specific variables):
 !     jcap     - spectral resolution
@@ -1039,6 +1051,8 @@
 !     closest_obs- when true, choose the timely closest surface observation from
 !     multiple observations at a station.  Currently only applied to Ceiling
 !     height and visibility.
+!     sfcwndob_biasc - When true, apply a bias-correction scheme for surface winds
+!                      based on a modified Kalman-Bucy filter
 !     pvis   - power parameter in nonlinear transformation for vis 
 !     pcldch - power parameter in nonlinear transformation for cldch
 !     scale_cv - scaling constant in meter
@@ -1096,21 +1110,22 @@
 !
 !     Flags to use the new IR cloud detection routine.  Flag must be set to true to use the new routine.  The default
 !     (no flag or .false.) will use the default.
-!     airs_cads: use the clod and aerosool detection software for the AIRS instrument
-!     cris_cads: use the cloud and aerosol detection software for CrIS instruments
-!     iasi_cads: use the cloud and aerosol detection software for IASI instruments
+!     airs_cads  : use the cloud and aerosol detection software for AIRS instrument
+!     cris_cads  : use the cloud and aerosol detection software for CrIS instruments
+!     iasi_cads  : use the cloud and aerosol detection software for IASI instruments
+!     iasing_cads: use the cloud and aerosol detection software for IASI-NG instruments
 !     
   
   namelist/obsqc/dfact,dfact1,erradar_inflate,tdrerr_inflate,oberrflg,&
        vadfile,noiqc,c_varqc,blacklst,use_poq7,hilbert_curve,tcp_refps,tcp_width,&
        tcp_ermin,tcp_ermax,gps_jacqc,qc_noirjaco3,qc_noirjaco3_pole,qc_satwnds,njqc,vqc,nvqc,hub_norm,troflg,lat_c,nrand,&
        aircraft_t_bc_pof,aircraft_t_bc,aircraft_t_bc_ext,biaspredt,upd_aircraft,cleanup_tail,&
-       hdist_aircraft,buddycheck_t,buddydiag_save,vadwnd_l2rw_qc,ompslp_mult_fact,  &
+       hdist_aircraft,buddycheck_t,buddydiag_save,vadwnd_l2rw_qc,ompslp_mult_fact,sfcwndob_biasc,&
        pvis,pcldch,scale_cv,estvisoe,estcldchoe,vis_thres,cldch_thres,cld_det_dec2bin, &
        q_doe_a_136,q_doe_a_137,q_doe_b_136,q_doe_b_137, &
        t_doe_a_136,t_doe_a_137,t_doe_b_136,t_doe_b_137, &
        uv_doe_a_236,uv_doe_a_237,uv_doe_a_213,uv_doe_b_236,uv_doe_b_237,uv_doe_b_213, &
-       vad_near_analtime,airs_cads,cris_cads,iasi_cads
+       vad_near_analtime,airs_cads,cris_cads,iasi_cads, iasing_cads
 
 ! OBS_INPUT (controls input data):
 !      dmesh(max(dthin))- thinning mesh for each group
@@ -1118,9 +1133,16 @@
 !      time_window_rad  - upper limit on time window for certain radiance input data
 !      ext_sonde        - logical for extended forward model on sonde data
 !      l_foreaft_thin -   separate TDR fore/aft scan for thinning
+!      hofx_2m_sfcfile  - Calculate h(x) for q2m and T2m from 
+!                         same fields in sfc_data.tile files
+!                         (for use in global 2m DA) 
+!      ignore_2mQM      - ignore quality mark of 9 (no obs errors)
+!                         for T2m and q2m in prepbufr file, and
+!                         insert hard-coded obs errors (for reanalysis,
+!                         allows use of archived prepbufr files)
 
   namelist/obs_input/dmesh,time_window_max,time_window_rad, &
-       ext_sonde,l_foreaft_thin,hofx_2m_sfcfile
+       ext_sonde,l_foreaft_thin,hofx_2m_sfcfile, ignore_2mQM
 
 ! SINGLEOB_TEST (one observation test case setup):
 !      maginnov   - magnitude of innovation for one ob
@@ -1636,9 +1658,25 @@
 !                           = 0.42 meters (default)
 !      hwllp_howv    - real, background error de-correlation length scale of howv 
 !                           = 170,000.0 meters (default 170 km)
+!      i_howv_mask   - integer, option to control the mask of the wave height (howv) over the land/lake area
+!                           = 0: do not mask (default)
+!                           = 1: mask the value over the land area only (using land mask data)
+!                           = 2: mask the value over the land & lake area (using land mask and lake mask data)
 !      corp_gust     - real, static background error of gust (stddev error)
 !      hwllp_gust    - real, background error de-correlation length scale of gust 
 !      oerr_gust     - real, observation error of gust
+!      i_sfcrough_fgs - integer, option to control the read-in of surface roughness from firstguess
+!                           = 0 : do not read surface roughness from firstguess,
+!                                 and use the default value instead (default)
+!                           = 1 : read surface roughness from firstguess and use it in analysis
+!      corp_vis      - real, static background error of visibility (stddev error),
+!                            in transformed space, not physical space
+!      hwllp_vis     - real, background error de-correlation length scale of visibility
+!                            in transformed space, not physical space
+!      i_gsd_terrain_match_mesonet - namelist integer, control application of GSD Terrain Match to MESONET (MSO)
+!                                observations of Temp (188, 195)
+!                          = 0 : do not apply GSD terrain match to MESONET Obs of T (default)
+!                          = 1 : apply GSD terrain match to MESONET Obs of T
 !
   namelist/rapidrefresh_cldsurf/dfi_radar_latent_heat_time_period, &
                                 metar_impact_radius,metar_impact_radius_lowcloud, &
@@ -1660,7 +1698,8 @@
                                 cld_bld_coverage,cld_clr_coverage,&
                                 i_cloud_q_innovation,i_ens_mean,DTsTmax, &
                                 i_T_Q_adjust,l_saturate_bkCloud,l_rtma3d,i_precip_vertical_check, &
-                                corp_howv, hwllp_howv, corp_gust, hwllp_gust, oerr_gust
+                                corp_howv, hwllp_howv, corp_gust, hwllp_gust, oerr_gust, i_howv_mask, &
+                                i_sfcrough_fgs, corp_vis, hwllp_vis, i_gsd_terrain_match_mesonet
 
 ! chem(options for gsi chem analysis) :
 !     berror_chem       - .true. when background  for chemical species that require
@@ -2337,6 +2376,8 @@
      write(6,strongopts)
      write(6,obsqc)
      write(6,*)'EXT_SONDE on type 120 =',ext_sonde
+     write(6,*)'hofx_2m_sfcfile =', hofx_2m_sfcfile
+     write(6,*)'ignore_2mQM =', ignore_2mQM
      ngroup=0
      do i=1,ndat
         dthin(i) = max(dthin(i),0)
@@ -2352,7 +2393,7 @@
      endif
      do i=1,ndat
         write(6,401)dfile(i),dtype(i),dplat(i),dsis(i),dval(i),dthin(i),dsfcalc(i),time_window(i)
- 401    format(1x,a20,1x,a10,1x,a10,1x,a20,1x,f10.2,1x,I3,1x,I3,1x,f10.2)
+ 401    format(1x,a20,1x,a10,1x,a12,1x,a20,1x,f10.2,1x,I3,1x,I3,1x,f10.2)
      end do
      write(6,superob_radar)
      write(6,lag_data)
