@@ -3064,7 +3064,7 @@ subroutine general_read_gfsatm_allhydro_nc(grd,sp_a,filename,uvflag,vordivflag,z
        if (imp_physics == 8) then
          call gsi_bundlegetpointer(gfs_bundle,'ni',g_ni  ,ier);istatus1=istatus1+ier
          call gsi_bundlegetpointer(gfs_bundle,'nr',g_nr  ,ier);istatus1=istatus1+ier
-       else if (cnvw_option) then
+       else
          call gsi_bundlegetpointer(gfs_bundle,'cnvw',g_ni  ,ier);istatus1=istatus1+ier
          call gsi_bundlegetpointer(gfs_bundle,'cnvc',g_nr  ,ier);istatus1=istatus1+ier
        endif
