@@ -1650,7 +1650,7 @@ contains
               !call radiance_ex_obserr(radmod,nchanl,clw_obs,clw_guess_retrieval,tnoise,tnoise_cld,error0)
               do i=1,nchanl
                  if (radmod%lcloud4crtm(i)<0) cycle
-                 call radiance_ex_obserr(cld_pred_varbc_use(i),radmod%cclr(i),radmod%ccld(i),tnoise(i),tnoise_cld(i),error0(i))
+                 call radiance_ex_obserr(cld_pred_varbc_use(i),radmod%cclr(i),radmod%ccld(i),tnoise(i),tnoise_cld(i),radmod%alpha(i),error0(i))
                  error_sym_cld(i) = error0(i) ! a copy of symmetric cloud error
               enddo
 

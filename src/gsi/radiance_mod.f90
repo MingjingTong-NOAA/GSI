@@ -119,6 +119,7 @@ module radiance_mod
     real(r_kind),pointer,dimension(:) :: cldval1 => NULL()
     character(len=20),pointer,dimension(:) :: cld_pred => NULL()                   ! CCH: cloud predictor type for each channel
     real(r_kind),pointer,dimension(:)      :: cld_diff_varbc_constraint => NULL()  ! CCH: VarBC cloud diff constraint
+    integer(i_kind),pointer,dimension(:)   :: alpha => NULL()  ! MJT: linear or quadratic fit
   end type rad_obs_type
 
   type(rad_obs_type),save,dimension(:),allocatable :: rad_type_info
@@ -548,12 +549,14 @@ contains
        allocate(rad_type_info(k)%ccld(rad_type_info(k)%nchannel)) 
        allocate(rad_type_info(k)%cldval1(rad_type_info(k)%nchannel)) 
        allocate(rad_type_info(k)%cld_pred(rad_type_info(k)%nchannel))                  ! CCH: cloud predictor type
+       allocate(rad_type_info(k)%alpha(rad_type_info(k)%nchannel)) ! MJT: alpha linear or quadratic fit
        allocate(rad_type_info(k)%cld_diff_varbc_constraint(rad_type_info(k)%nchannel)) ! CCH: VarBC cloud diff constraint
 
        rad_type_info(k)%cclr(:)=9999.9_r_kind
        rad_type_info(k)%ccld(:)=zero
        rad_type_info(k)%cldval1(:)=zero
        rad_type_info(k)%cld_pred(:)='clw'                          ! CCH: (default) cloud predictor type
+       rad_type_info(k)%alpha(:)=1_i_kind
        rad_type_info(k)%cld_diff_varbc_constraint(:)=0.05_r_kind   ! CCH: (default) cloud diff constraint
 
     end do ! end total_rad_type
@@ -622,6 +625,7 @@ contains
           radmod%ccld => rad_type_info(i)%ccld
           radmod%cldval1 => rad_type_info(i)%cldval1
           radmod%cld_pred => rad_type_info(i)%cld_pred                                       ! CCH: cloud predictor type
+          radmod%alpha => rad_type_info(i)%alpha
           radmod%cld_diff_varbc_constraint => rad_type_info(i)%cld_diff_varbc_constraint     ! CCH: cloud diff VarBC constraint
           radmod%lprecip = radmod%lcloud_fwd .and. rad_type_info(i)%lprecip 
 
@@ -709,6 +713,7 @@ contains
        if(associated(rad_type_info(k)%ccld)) deallocate(rad_type_info(k)%ccld)
        if(associated(rad_type_info(k)%cldval1)) deallocate(rad_type_info(k)%cldval1)
        if(associated(rad_type_info(k)%cld_pred)) deallocate(rad_type_info(k)%cld_pred)
+       if(associated(rad_type_info(k)%alpha)) deallocate(rad_type_info(k)%alpha)
        if(associated(rad_type_info(k)%cld_diff_varbc_constraint)) deallocate(rad_type_info(k)%cld_diff_varbc_constraint)
 
     end do
@@ -814,7 +819,8 @@ contains
                 ! CCH: modified cloud table (including new columns specifying cloud predictor, and constraint criteria for each channel)
                 !call sensor_parameter_table(trim(tablename),lunin,rad_type_info(i)%nchannel,rad_type_info(i)%cclr,rad_type_info(i)%ccld)
                 call sensor_parameter_table(trim(tablename),lunin,rad_type_info(i)%nchannel,rad_type_info(i)%cclr,rad_type_info(i)%ccld, &
-                                            cld_pred=rad_type_info(i)%cld_pred, cld_diff_varbc_constraint=rad_type_info(i)%cld_diff_varbc_constraint)
+                                            cld_pred=rad_type_info(i)%cld_pred, alpha=rad_type_info(i)%alpha, &
+                                            cld_diff_varbc_constraint=rad_type_info(i)%cld_diff_varbc_constraint)
              endif
              exit
           end if
@@ -826,7 +832,7 @@ contains
   end subroutine radiance_parameter_cloudy_init
 
 ! CCH: add reading cloud predictor:
-  subroutine sensor_parameter_table(filename,lunin,nchal,cclr,ccld,cldval1,cld_pred,cld_diff_varbc_constraint)
+  subroutine sensor_parameter_table(filename,lunin,nchal,cclr,ccld,cldval1,cld_pred,alpha,cld_diff_varbc_constraint)
 
 !$$$  subprogram documentation block
 !                .      .    .
@@ -862,9 +868,10 @@ contains
     real(r_kind)    , dimension(nchal), intent(inout) :: cclr,ccld
     real(r_kind)    , dimension(nchal), optional, intent(inout) :: cldval1
     character(len=20), dimension(nchal), optional, intent(inout) :: cld_pred
+    integer(i_kind) , dimension(nchal), optional, intent(inout) :: alpha
     real(r_kind)     , dimension(nchal), optional, intent(inout) :: cld_diff_varbc_constraint
 
-    integer(i_kind) ii,ntot,nrows,ich0
+    integer(i_kind) ii,ntot,nrows,ich0,alpha0
     real(r_kind) cclr0,ccld0,cldval1_0,cld_diff_varbc_constraint0
     character(len=20) :: cld_pred0
     character(len=256),allocatable,dimension(:):: utable
@@ -881,6 +888,10 @@ contains
 
     if ( present(cld_pred) ) then ! CCH: (default) cloud predictor
        cld_pred(:) = 'clw'
+    endif
+
+    if ( present(alpha) ) then ! MJT: (default) linear fit
+       alpha(:) = 1_i_kind
     endif
 
     if ( present(cld_diff_varbc_constraint) ) then ! CCH: (default) VarBC cloud diff constraint
@@ -905,8 +916,9 @@ contains
          read(utable(ii),*) ich0,cclr0,ccld0,cldval1_0
          cldval1(ich0)=cldval1_0
        elseif (present(cld_pred)) then ! CCH: read cloud predictor type from table
-         read(utable(ii),*) ich0,cclr0,ccld0,cld_pred0,cld_diff_varbc_constraint0
+         read(utable(ii),*) ich0,cclr0,ccld0,cld_pred0,alpha0,cld_diff_varbc_constraint0
          cld_pred(ich0)=cld_pred0
+         alpha(ich0)=alpha0
          cld_diff_varbc_constraint(ich0)=cld_diff_varbc_constraint0
        else
          read(utable(ii),*) ich0,cclr0,ccld0
@@ -924,9 +936,9 @@ contains
              write(6,*) ii,cclr(ii),ccld(ii),cldval1(ii)
           end do
        elseif (present(cld_pred)) then ! CCH: sanity check for cloud predictor
-          write(6,*) 'CCH:: /radiance_mod.f90/ sensor_parameter_table: ich  cclr  ccld  cld_pred cld_diff_constraint'
+          write(6,*) 'CCH:: /radiance_mod.f90/ sensor_parameter_table: ich  cclr  ccld  cld_pred alpha cld_diff_constraint'
           do ii=1,nchal
-             write(6,*) ii,cclr(ii),ccld(ii),cld_pred(ii),cld_diff_varbc_constraint(ii)
+             write(6,*) ii,cclr(ii),ccld(ii),cld_pred(ii),alpha(ii),cld_diff_varbc_constraint(ii)
           end do
        else
           write(6,*) 'sensor_parameter_table: ich  cclr  ccld'
@@ -1064,7 +1076,7 @@ contains
 ! (2) this will be called one channel at a time;
 !     (originally, the stdev of all channels will be calculated all at once)
 
-  subroutine radiance_ex_obserr_1(cld_pred,cclr,ccld,tnoise,tnoise_cld,error0)
+  subroutine radiance_ex_obserr_1(cld_pred,cclr,ccld,tnoise,tnoise_cld,alpha,error0)
 !$$$  subprogram documentation block
 !                .      .    .
 ! subprogram:    radiance_ex_obserr_1
@@ -1090,13 +1102,20 @@ contains
     implicit none
     
     real(r_kind),intent(in) :: cld_pred, cclr, ccld, tnoise, tnoise_cld
+    integer(i_kind),intent(in) :: alpha
     real(r_kind),intent(inout) :: error0
+    real(r_kind) :: gamma
 
     if(cld_pred <= cclr) then
        error0 = tnoise
     else if( cld_pred > cclr .and. cld_pred < ccld ) then
-       error0 = tnoise + (cld_pred - cclr)* &
-                         (tnoise_cld-tnoise)/(ccld-cclr)
+       if (alpha == 1) then
+          error0 = tnoise + (cld_pred - cclr)* &
+                            (tnoise_cld-tnoise)/(ccld-cclr)
+       else
+          gamma = (cld_pred - cclr) / (ccld - cclr)
+          error0 = tnoise + (gamma**alpha) * (tnoise_cld - tnoise)
+       endif
     else
        error0 = tnoise_cld
     endif
